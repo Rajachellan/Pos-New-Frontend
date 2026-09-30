@@ -3,28 +3,21 @@ import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 
 function layout({
-    children,
-  }: {
-    children: React.ReactNode;
-  }) {
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <>
-    
-    <section className='flex min-h-screen'>
-    
-    <Sidebar/>
-
-    <div className='w-full h-full'>
-    <Navbar/>
-    <div>
-    {children}
+    <div className="flex min-h-screen bg-slate-50/70 font-sans antialiased text-slate-800">
+      <Sidebar />
+      <div className="flex flex-1 flex-col min-w-0">
+        <Navbar />
+        <main className="flex-1 overflow-y-auto">
+          {children}
+        </main>
+      </div>
     </div>
-    </div>
-
-    </section>
-    
-    </>
   )
 }
 
-export default layout
+export default layout

@@ -45,7 +45,7 @@ function Sidebar() {
  
   {
     label: "KDS (Kitchen)",
-    href: "/user-dashboard/menu",
+    href: "/user-dashboard/kitchen",
     icon: RiRestaurantLine,
   },
    {
@@ -55,7 +55,7 @@ function Sidebar() {
   },
   {
     label: "Order History",
-    href: "/user-dashboard/profile",
+    href: "/user-dashboard/order-history",
     icon: FaHistory ,
   },
   {

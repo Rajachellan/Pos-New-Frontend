@@ -9,7 +9,7 @@ function page() {
     
     <Navbar/>
     <HeroBannner/>
-    <ChooseBranch/>
+    {/* <ChooseBranch/> */}
     </>
   )
 }
