@@ -3,8 +3,10 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import api from '../services/api'
+import { getSocket } from '../services/socket'
 import { AxiosError } from 'axios'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useAuth } from '../context/AuthContext'
 import {
   FiRefreshCw,
   FiGrid,
@@ -80,6 +82,7 @@ interface BranchData {
 }
 
 export default function UserDashboardPage() {
+  const { user: authUser, isAdmin, isManager, isStaff, isSuperAdmin } = useAuth()
   const [tables, setTables] = useState<TableData[]>([])
   const [areas, setAreas] = useState<AreaData[]>([])
   const [kitchenOrders, setKitchenOrders] = useState<KitchenOrder[]>([])
@@ -117,11 +120,14 @@ export default function UserDashboardPage() {
     if (showRefreshSpinner) setIsRefreshing(true)
     else setLoading(true)
 
+    const savedBranchId = typeof window !== 'undefined' ? localStorage.getItem('pos_selected_branch') : null
+    const branchQuery = savedBranchId && savedBranchId !== 'ALL' ? `?branchId=${savedBranchId}` : ''
+
     try {
       const [tablesRes, areasRes, kitchenRes, userRes, branchRes] = await Promise.allSettled([
-        api.get('/get/all/tables'),
-        api.get('/get/area/branch'),
-        api.get('/kitchen/orders'),
+        api.get(`/get/tables/branch${branchQuery}`),
+        api.get(`/get/area/branch${branchQuery}`),
+        api.get(`/kitchen/orders${branchQuery}`),
         api.get('/user/get'),
         api.get('/get/branch/role')
       ])
@@ -143,7 +149,11 @@ export default function UserDashboardPage() {
       }
 
       if (branchRes.status === 'fulfilled' && Array.isArray(branchRes.value?.data?.data)) {
-        setBranch(branchRes.value.data.data[0] || null)
+        const branchList = branchRes.value.data.data
+        const chosen = savedBranchId
+          ? branchList.find((b: any) => b._id === savedBranchId) || branchList[0]
+          : branchList[0]
+        setBranch(chosen || null)
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err)
@@ -155,7 +165,52 @@ export default function UserDashboardPage() {
 
   useEffect(() => {
     fetchDashboardData()
+
+    const socket = getSocket()
+    const handleTableUpdated = (data: { tableId: string; availabilityStatus: 'AVAILABLE' | 'OCCUPIED' }) => {
+      if (!data?.tableId) return
+      setTables((prev) =>
+        prev.map((t) => (t._id === data.tableId ? { ...t, availabilityStatus: data.availabilityStatus } : t))
+      )
+    }
+
+    const handleKotReceived = () => {
+      fetchDashboardData(true)
+    }
+
+    const handleOrderUpdated = () => {
+      fetchDashboardData(true)
+    }
+
+    const handleBranchChange = () => {
+      fetchDashboardData(true)
+    }
+
+    socket.on('table_updated', handleTableUpdated)
+    socket.on('kot_received', handleKotReceived)
+    socket.on('order_updated', handleOrderUpdated)
+    window.addEventListener('pos_branch_changed', handleBranchChange)
+
+    return () => {
+      socket.off('table_updated', handleTableUpdated)
+      socket.off('kot_received', handleKotReceived)
+      socket.off('order_updated', handleOrderUpdated)
+      window.removeEventListener('pos_branch_changed', handleBranchChange)
+    }
   }, [])
+
+  const handleReleaseTable = async (tableId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      await api.post(`/tables/${tableId}/release`)
+      setTables((prev) =>
+        prev.map((t) => (t._id === tableId ? { ...t, availabilityStatus: 'AVAILABLE' } : t))
+      )
+    } catch (err) {
+      console.error('Failed to release table:', err)
+    }
+  }
 
   // Stat calculations
   const totalTablesCount = tables.length
@@ -204,17 +259,29 @@ export default function UserDashboardPage() {
       gradient: 'from-rose-600 to-orange-600',
       shadowColor: 'hover:shadow-orange-500/20'
     },
-    {
-      title: 'Admin Control Center',
-      subtitle: 'Branch & User setup',
-      description: 'Configure branches, define floor areas, user accounts, and roles.',
-      href: '/admin-dashboard',
-      icon: RiShieldUserLine,
-      badgeText: 'System Config',
-      badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
-      gradient: 'from-gray-800 to-gray-950',
-      shadowColor: 'hover:shadow-gray-700/20'
-    }
+    isAdmin()
+      ? {
+          title: 'Admin Control Center',
+          subtitle: 'Branch & User setup',
+          description: 'Configure branches, define floor areas, user accounts, and roles.',
+          href: '/admin-dashboard',
+          icon: RiShieldUserLine,
+          badgeText: 'Admin Only',
+          badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
+          gradient: 'from-gray-800 to-gray-950',
+          shadowColor: 'hover:shadow-gray-700/20'
+        }
+      : {
+          title: 'Menu Management',
+          subtitle: 'Dishes & Categories',
+          description: 'Manage menu items, prices, active dishes, and item categories.',
+          href: '/user-dashboard/menu-management',
+          icon: MdOutlineRestaurantMenu,
+          badgeText: 'Operations',
+          badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
+          gradient: 'from-amber-600 to-rose-600',
+          shadowColor: 'hover:shadow-amber-500/20'
+        }
   ]
 
   return (
@@ -246,7 +313,7 @@ export default function UserDashboardPage() {
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight font-playfair drop-shadow-xs">
-              {greeting}, {user?.name ?? 'Staff'}!
+              {greeting}, {authUser?.name ?? user?.name ?? 'Team'}!
             </h1>
             <p className="text-sm text-red-100/90 max-w-xl leading-relaxed">
               Welcome to your live operational portal. Monitor active floor tables, real-time kitchen orders, and floor seating availability at a glance.
@@ -552,12 +619,24 @@ export default function UserDashboardPage() {
                       {isAvailable ? 'Available' : 'Occupied'}
                     </span>
 
-                    <Link
-                      href={`/user-dashboard/menus?tableId=${t._id}`}
-                      className="text-[11px] font-bold text-[#9b1c1c] hover:underline"
-                    >
-                      Order &rarr;
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      {!isAvailable && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleReleaseTable(t._id, e)}
+                          title="Free Table / Release"
+                          className="px-2 py-0.5 rounded bg-white hover:bg-rose-50 text-gray-700 hover:text-rose-700 border border-gray-200 text-[10px] font-bold transition shadow-2xs"
+                        >
+                          Free
+                        </button>
+                      )}
+                      <Link
+                        href={`/user-dashboard/menus?tableId=${t._id}`}
+                        className="text-[11px] font-bold text-[#9b1c1c] hover:underline"
+                      >
+                        {isAvailable ? 'Order \u2192' : 'Bill \u2192'}
+                      </Link>
+                    </div>
                   </div>
                 </div>
               )
@@ -658,12 +737,20 @@ export default function UserDashboardPage() {
             <div className="mt-5 space-y-4 text-xs">
               <div className="flex justify-between items-center py-2 border-b border-gray-800/60">
                 <span className="text-gray-400">Current User:</span>
-                <span className="font-semibold text-white">{user?.name ?? 'Staff User'}</span>
+                <span className="font-semibold text-white">{authUser?.name ?? user?.name ?? 'Staff User'}</span>
               </div>
 
               <div className="flex justify-between items-center py-2 border-b border-gray-800/60">
-                <span className="text-gray-400">User Role:</span>
-                <span className="font-semibold uppercase tracking-wider text-red-400">{user?.role ?? 'STAFF'}</span>
+                <span className="text-gray-400">System Role:</span>
+                <span className="font-semibold uppercase tracking-wider text-red-400">
+                  {isSuperAdmin()
+                    ? 'Super Admin'
+                    : isAdmin()
+                    ? 'Admin'
+                    : isManager()
+                    ? 'Manager'
+                    : 'Staff'}
+                </span>
               </div>
 
               <div className="flex justify-between items-center py-2 border-b border-gray-800/60">
@@ -681,14 +768,23 @@ export default function UserDashboardPage() {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-gray-800">
+          <div className="pt-4 border-t border-gray-800 flex flex-col gap-2">
             <Link
               href="/user-dashboard/tables"
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-[#9b1c1c] to-[#dc2626] font-bold text-xs text-white shadow-lg hover:from-[#8b1515] hover:to-[#b91c1c] transition cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#9b1c1c] to-[#dc2626] font-bold text-xs text-white shadow-lg hover:from-[#8b1515] hover:to-[#b91c1c] transition cursor-pointer"
             >
               <span>Manage Floor Seating</span>
               <FiArrowRight size={14} />
             </Link>
+            {isAdmin() && (
+              <Link
+                href="/admin-dashboard"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200 border border-slate-700 transition cursor-pointer"
+              >
+                <span>Switch to Admin Console</span>
+                <RiShieldUserLine size={14} className="text-red-400" />
+              </Link>
+            )}
           </div>
         </div>
       </div>

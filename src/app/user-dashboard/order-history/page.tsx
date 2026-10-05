@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import api from "../../services/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { FaHistory } from "react-icons/fa";
@@ -18,6 +19,7 @@ import {
   FiShoppingBag,
 } from "react-icons/fi";
 import { MdTableRestaurant } from "react-icons/md";
+import { useAuth } from "@/src/app/context/AuthContext";
 
 interface OrderItem {
   _id: string;
@@ -33,9 +35,13 @@ interface TableInfo {
 
 interface Order {
   _id: string;
+  orderNumber?: string;
   tableId?: TableInfo;
   items: OrderItem[];
+  subtotal?: number;
+  gstAmount?: number;
   totalAmount: number;
+  paymentMethod?: string;
   status: "PENDING" | "ORDERED" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED";
   createdAt: string;
   updatedAt: string;
@@ -43,12 +49,16 @@ interface Order {
 
 interface Summary {
   totalOrders: number;
-  totalRevenue: number;
+  totalRevenue: number | null;
   activeCount: number;
   cancelledCount: number;
+  canViewFinances?: boolean;
 }
 
-export default function OrderHistoryPage() {
+function OrderHistoryContent() {
+  const { canViewFinances } = useAuth();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
   const [orders, setOrders] = useState<Order[]>([]);
   const [summary, setSummary] = useState<Summary>({
     totalOrders: 0,
@@ -57,14 +67,22 @@ export default function OrderHistoryPage() {
     cancelledCount: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
+  const [selectedStatus, setSelectedStatus] = useState<string>(tabParam ? tabParam.toUpperCase() : "ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    if (tabParam) {
+      setSelectedStatus(tabParam.toUpperCase());
+    }
+  }, [tabParam]);
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const res = await api.get("/orders/history");
+      const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      const branchQuery = savedBranchId && savedBranchId !== "ALL" ? `?branchId=${savedBranchId}` : "";
+      const res = await api.get(`/orders/history${branchQuery}`);
       if (res.data.success) {
         setOrders(res.data.data);
         if (res.data.summary) {
@@ -78,8 +96,29 @@ export default function OrderHistoryPage() {
     }
   };
 
+  const handleSettleOrder = async (order: Order) => {
+    try {
+      await api.post("/pay/order", {
+        orderId: order._id,
+        tableId: order.tableId?._id,
+        paymentMethod: "CASH",
+      });
+      await fetchOrders();
+    } catch (err) {
+      console.error("Failed to settle order:", err);
+    }
+  };
+
   useEffect(() => {
     fetchOrders();
+
+    const handleBranchChange = () => {
+      fetchOrders();
+    };
+    window.addEventListener("pos_branch_changed", handleBranchChange);
+    return () => {
+      window.removeEventListener("pos_branch_changed", handleBranchChange);
+    };
   }, []);
 
   // Filter orders based on status & search query
@@ -92,8 +131,10 @@ export default function OrderHistoryPage() {
         : order.status === selectedStatus;
 
     const tableNum = order.tableId?.tableNumber ? String(order.tableId.tableNumber) : "";
+    const orderNum = order.orderNumber || "";
     const matchesSearch =
       order._id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      orderNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
       tableNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.items.some((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -145,16 +186,18 @@ export default function OrderHistoryPage() {
         (item) => `
         <tr>
           <td style="padding: 6px 0;">${item.name} x${item.quantity}</td>
-          <td style="padding: 6px 0; text-align: right;">$${(item.price * item.quantity).toFixed(2)}</td>
+          <td style="padding: 6px 0; text-align: right;">₹${(item.price * item.quantity).toFixed(2)}</td>
         </tr>
       `
       )
       .join("");
 
+    const orderNum = order.orderNumber || `#${order._id.slice(-6).toUpperCase()}`;
+
     printWindow.document.write(`
       <html>
         <head>
-          <title>Order Receipt #${order._id.slice(-6).toUpperCase()}</title>
+          <title>Order Receipt ${orderNum}</title>
           <style>
             body { font-family: 'Courier New', Courier, monospace; padding: 20px; width: 300px; margin: auto; }
             h2, h3 { text-align: center; margin: 5px 0; }
@@ -164,9 +207,9 @@ export default function OrderHistoryPage() {
           </style>
         </head>
         <body>
-          <h2>PET POOJA HOTEL</h2>
-          <h3>Receipt / KOT</h3>
-          <p style="font-size: 12px; text-align: center;">Table: #${order.tableId?.tableNumber || 'N/A'} | Date: ${new Date(order.createdAt).toLocaleString()}</p>
+          <h2>TANJAVOOR RESTAURANT</h2>
+          <h3>Tax Invoice / Bill</h3>
+          <p style="font-size: 12px; text-align: center;">Order: ${orderNum} | Table: #${order.tableId?.tableNumber || 'N/A'}<br/>Date: ${new Date(order.createdAt).toLocaleString()}</p>
           <div class="divider"></div>
           <table>
             <thead>
@@ -180,7 +223,8 @@ export default function OrderHistoryPage() {
             </tbody>
           </table>
           <div class="divider"></div>
-          <div class="total">Total: $${(order.totalAmount || 0).toFixed(2)}</div>
+          <div class="total">Total: ₹${(order.totalAmount || 0).toFixed(2)}</div>
+          ${order.paymentMethod ? `<p style="text-align: right; font-size: 12px; font-weight: bold;">Payment: ${order.paymentMethod} (PAID)</p>` : ''}
           <p style="text-align: center; margin-top: 20px; font-size: 11px;">Thank you for dining with us!</p>
           <script>
             window.onload = function() { window.print(); window.close(); }
@@ -214,15 +258,29 @@ export default function OrderHistoryPage() {
 
       {/* Analytics Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Sales Revenue</p>
-            <h3 className="text-2xl font-extrabold text-gray-900 mt-1">${summary.totalRevenue.toFixed(2)}</h3>
+        {canViewFinances() && summary.totalRevenue !== null ? (
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Sales Revenue</p>
+              <h3 className="text-2xl font-extrabold text-gray-900 mt-1">₹{(summary.totalRevenue || 0).toFixed(2)}</h3>
+            </div>
+            <div className="w-11 h-11 rounded-xl bg-[#fdf2f2] text-[#e02424] flex items-center justify-center text-xl font-bold">
+              <FiDollarSign />
+            </div>
           </div>
-          <div className="w-11 h-11 rounded-xl bg-[#fdf2f2] text-[#e02424] flex items-center justify-center text-xl font-bold">
-            <FiDollarSign />
+        ) : (
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Completed Orders</p>
+              <h3 className="text-2xl font-extrabold text-emerald-600 mt-1">
+                {orders.filter((o) => o.status === "COMPLETED").length}
+              </h3>
+            </div>
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-bold">
+              <FiCheckCircle />
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
@@ -315,6 +373,7 @@ export default function OrderHistoryPage() {
                   <th className="py-3 px-4">Table / Area</th>
                   <th className="py-3 px-4">Items Summary</th>
                   <th className="py-3 px-4">Total Bill</th>
+                  <th className="py-3 px-4">Method</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -323,7 +382,7 @@ export default function OrderHistoryPage() {
                 {filteredOrders.map((order) => (
                   <tr key={order._id} className="hover:bg-gray-50/80 transition">
                     <td className="py-3 px-4 font-mono font-bold text-gray-900">
-                      #{order._id.slice(-6).toUpperCase()}
+                      {order.orderNumber || `#${order._id.slice(-6).toUpperCase()}`}
                     </td>
                     <td className="py-3 px-4 text-gray-600">
                       <div className="flex items-center gap-1">
@@ -349,11 +408,29 @@ export default function OrderHistoryPage() {
                       </div>
                     </td>
                     <td className="py-3 px-4 font-extrabold text-gray-900 text-sm">
-                      ${(order.totalAmount || 0).toFixed(2)}
+                      ₹{(order.totalAmount || 0).toFixed(2)}
+                    </td>
+                    <td className="py-3 px-4">
+                      {order.paymentMethod ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                          {order.paymentMethod}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">—</span>
+                      )}
                     </td>
                     <td className="py-3 px-4">{getStatusBadge(order.status)}</td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {["ORDERED", "PREPARING", "READY"].includes(order.status) && (
+                          <button
+                            onClick={() => handleSettleOrder(order)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] transition shadow-2xs whitespace-nowrap"
+                            title="Complete Order & Free Table"
+                          >
+                            Settle & Free
+                          </button>
+                        )}
                         <button
                           onClick={() => setSelectedOrder(order)}
                           className="p-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition"
@@ -400,7 +477,7 @@ export default function OrderHistoryPage() {
                   <FiShoppingBag />
                 </span>
                 <h3 className="text-lg font-bold text-gray-900">Order Invoice Details</h3>
-                <p className="text-xs text-gray-500">Order ID: #{selectedOrder._id}</p>
+                <p className="text-xs text-gray-500">Order ID: {selectedOrder.orderNumber || `#${selectedOrder._id}`}</p>
               </div>
 
               <div className="py-4 space-y-3">
@@ -416,6 +493,14 @@ export default function OrderHistoryPage() {
                   <span>Status:</span>
                   <span>{getStatusBadge(selectedOrder.status)}</span>
                 </div>
+                {selectedOrder.paymentMethod && (
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>Payment Method:</span>
+                    <span className="font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 uppercase">
+                      {selectedOrder.paymentMethod} (PAID)
+                    </span>
+                  </div>
+                )}
 
                 {/* Items Breakdown */}
                 <div className="mt-4 pt-3 border-t border-gray-100">
@@ -425,9 +510,9 @@ export default function OrderHistoryPage() {
                       <div key={item._id || item.name} className="flex justify-between text-xs items-center bg-gray-50 p-2 rounded-lg">
                         <div>
                           <p className="font-semibold text-gray-800">{item.name}</p>
-                          <p className="text-[10px] text-gray-500">${item.price.toFixed(2)} x {item.quantity}</p>
+                          <p className="text-[10px] text-gray-500">₹{item.price.toFixed(2)} x {item.quantity}</p>
                         </div>
-                        <span className="font-bold text-gray-900">${(item.price * item.quantity).toFixed(2)}</span>
+                        <span className="font-bold text-gray-900">₹{(item.price * item.quantity).toFixed(2)}</span>
                       </div>
                     ))}
                   </div>
@@ -435,7 +520,7 @@ export default function OrderHistoryPage() {
 
                 <div className="pt-3 border-t border-gray-200 flex justify-between items-center">
                   <span className="text-sm font-bold text-gray-800">Grand Total:</span>
-                  <span className="text-xl font-extrabold text-[#e02424]">${(selectedOrder.totalAmount || 0).toFixed(2)}</span>
+                  <span className="text-xl font-extrabold text-[#e02424]">₹{(selectedOrder.totalAmount || 0).toFixed(2)}</span>
                 </div>
               </div>
 
@@ -460,3 +545,18 @@ export default function OrderHistoryPage() {
     </div>
   );
 }
+
+export default function OrderHistoryPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-8 text-center text-gray-500 font-medium">
+          Loading Orders & History...
+        </div>
+      }
+    >
+      <OrderHistoryContent />
+    </Suspense>
+  );
+}
+

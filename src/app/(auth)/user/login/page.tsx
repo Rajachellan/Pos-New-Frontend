@@ -7,6 +7,7 @@ import api from '@/src/app/services/api';
 
 import { useRouter } from 'next/navigation';
 import { AxiosError } from 'axios';
+import { useAuth } from '@/src/app/context/AuthContext';
 
 function LoginPage() {
 
@@ -18,21 +19,14 @@ function LoginPage() {
   const [loading, setLoading] = useState(false)
 
   const router = useRouter()
+  const { loginUser } = useAuth()
 
   async function loginFun(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
     try {
       const res = await api.post('/user/login', { email, password })
-      localStorage.setItem("Token", res.data.token)
-
-      if (res.data.userRole === "Super-Admin") {
-        router.push('/admin-dashboard')
-      }
-      else {
-        router.push('/user-dashboard')
-      }
-
+      loginUser(res.data)
       setEmail("")
       setPassword("")
     }
@@ -97,16 +91,16 @@ function LoginPage() {
                     htmlFor="email"
                     className="mb-2 block text-sm font-semibold text-gray-700"
                   >
-                    Email address
+                    Email address or Username
                   </label>
 
                   <input
                     id="email"
-                    type="email"
+                    type="text"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    placeholder="admin@example.com"
-                    autoComplete="email"
+                    placeholder="Enter email or username"
+                    autoComplete="username"
                     required
                     className="w-full rounded-lg border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-red-600 focus:ring-2 focus:ring-red-100"
                   />

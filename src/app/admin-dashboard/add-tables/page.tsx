@@ -2,7 +2,15 @@
 
 import React, { useEffect, useState } from "react"
 import { PiTableBold, PiMapPinSimpleAreaFill } from "react-icons/pi"
-import { RiSearchLine, RiCheckLine, RiErrorWarningLine, RiBuildingLine, RiFilter3Line } from "react-icons/ri"
+import {
+  RiSearchLine,
+  RiCheckLine,
+  RiErrorWarningLine,
+  RiBuildingLine,
+  RiFilter3Line,
+  RiEditLine,
+  RiDeleteBinLine,
+} from "react-icons/ri"
 import api from "../../services/api"
 import { AxiosError } from "axios"
 
@@ -32,10 +40,16 @@ function AddTablesPage() {
   const [tableData, setTableDatas] = useState<TableData[]>([])
   const [tableNumber, setTableNumber] = useState<string>("")
   const [selectedAreaId, setSelectedAreaId] = useState<string>("")
+  const [tableAvailability, setTableAvailability] = useState<"AVAILABLE" | "OCCUPIED">("AVAILABLE")
   const [loading, setLoading] = useState<boolean>(false)
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [selectedFilterArea, setSelectedFilterArea] = useState<string>("ALL")
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  // Edit and Delete states
+  const [editingTable, setEditingTable] = useState<TableData | null>(null)
+  const [deleteModalTable, setDeleteModalTable] = useState<TableData | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState<boolean>(false)
 
   async function getAreaDatas() {
     try {
@@ -60,22 +74,50 @@ function AddTablesPage() {
     getAllTableDatasFun()
   }, [])
 
-  async function addTablesfun(e: React.FormEvent<HTMLFormElement>) {
+  function handleStartEdit(table: TableData) {
+    setEditingTable(table)
+    setTableNumber(table.tableNumber)
+    setSelectedAreaId(table.areaName?._id || "")
+    setTableAvailability(table.availabilityStatus || "AVAILABLE")
+    setNotification(null)
+  }
+
+  function handleCancelEdit() {
+    setEditingTable(null)
+    setTableNumber("")
+    setSelectedAreaId("")
+    setTableAvailability("AVAILABLE")
+  }
+
+  async function handleAddOrUpdateTable(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
     setNotification(null)
 
     try {
-      const res = await api.post('/add/tables', {
-        tableNumber,
-        areaName: selectedAreaId,
-      })
-      setNotification({
-        type: 'success',
-        message: res.data.message || 'Table added successfully!',
-      })
-      setTableNumber("")
-      setSelectedAreaId("")
+      if (editingTable) {
+        const res = await api.put(`/tables/${editingTable._id}`, {
+          tableNumber,
+          areaName: selectedAreaId,
+          availabilityStatus: tableAvailability,
+        })
+        setNotification({
+          type: 'success',
+          message: res.data.message || 'Table updated successfully!',
+        })
+        handleCancelEdit()
+      } else {
+        const res = await api.post('/add/tables', {
+          tableNumber,
+          areaName: selectedAreaId,
+        })
+        setNotification({
+          type: 'success',
+          message: res.data.message || 'Table added successfully!',
+        })
+        setTableNumber("")
+        setSelectedAreaId("")
+      }
       getAllTableDatasFun()
     } catch (err) {
       const error = err as AxiosError<{ message?: string }>
@@ -84,10 +126,39 @@ function AddTablesPage() {
         message:
           error.response?.data?.message ||
           error.message ||
-          "Failed to add table. Please try again.",
+          "Failed to process table. Please try again.",
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleDeleteTable() {
+    if (!deleteModalTable) return
+    setDeleteLoading(true)
+    try {
+      const res = await api.delete(`/tables/${deleteModalTable._id}`)
+      setNotification({
+        type: 'success',
+        message: res.data.message || 'Table deleted successfully!',
+      })
+      if (editingTable?._id === deleteModalTable._id) {
+        handleCancelEdit()
+      }
+      setDeleteModalTable(null)
+      getAllTableDatasFun()
+    } catch (err) {
+      const error = err as AxiosError<{ message?: string }>
+      setNotification({
+        type: 'error',
+        message:
+          error.response?.data?.message ||
+          error.message ||
+          'Failed to delete table.',
+      })
+      setDeleteModalTable(null)
+    } finally {
+      setDeleteLoading(false)
     }
   }
 
@@ -96,7 +167,7 @@ function AddTablesPage() {
   const filteredTables = tableData.filter((table) => {
     const matchesSearch =
       table.tableNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      table.areaName?.areaName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      table.areaName?.areaName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (table.areaName?.branchName?.branchName &&
         table.areaName.branchName.branchName.toLowerCase().includes(searchQuery.toLowerCase()))
 
@@ -150,26 +221,56 @@ function AddTablesPage() {
           </div>
           <button
             onClick={() => setNotification(null)}
-            className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+            className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
           >
             ✕
           </button>
         </div>
       )}
 
-      {/* Main Grid: Form & Preview Left, Tables Grid Right */}
+      {/* Main Grid: Form & Preview Left (Sticky), Tables Grid Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Creation Form + Preview Card */}
-        <div className="lg:col-span-4 space-y-6">
+        {/* Left Column: Sticky Creation Form + Preview Card */}
+        <div className="lg:col-span-4 lg:sticky lg:top-6 lg:self-start space-y-6 max-h-[calc(100vh-4rem)] overflow-y-auto pr-1">
           <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-5">
-            <div className="border-b border-slate-100 pb-3">
-              <h2 className="text-lg font-bold text-slate-900">Add Dining Table</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Register table number and select target dining section.
-              </p>
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">
+                  {editingTable ? "Edit Dining Table" : "Add Dining Table"}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {editingTable
+                    ? "Update table number, dining zone, or live status."
+                    : "Register table number and select target dining section."}
+                </p>
+              </div>
+              {editingTable && (
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="rounded-lg bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
 
-            <form onSubmit={addTablesfun} className="space-y-4">
+            {editingTable && (
+              <div className="flex items-center justify-between rounded-xl bg-blue-50 border border-blue-200/70 px-3 py-2 text-xs text-blue-900 font-medium">
+                <span>
+                  Editing: <strong>{editingTable.tableNumber}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="text-blue-700 hover:text-blue-900 font-bold text-xs underline cursor-pointer"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
+
+            <form onSubmit={handleAddOrUpdateTable} className="space-y-4">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-2">
                   Table Number / Name *
@@ -205,13 +306,62 @@ function AddTablesPage() {
                 </select>
               </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-blue-900/20 hover:from-blue-700 hover:to-indigo-700 transition disabled:opacity-50 cursor-pointer"
-              >
-                {loading ? "Adding Table..." : "Create Table"}
-              </button>
+              {editingTable && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-2">
+                    Availability Status
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTableAvailability("AVAILABLE")}
+                      className={`rounded-xl py-2.5 text-xs font-bold transition border cursor-pointer ${
+                        tableAvailability === "AVAILABLE"
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-100"
+                          : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Available
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTableAvailability("OCCUPIED")}
+                      className={`rounded-xl py-2.5 text-xs font-bold transition border cursor-pointer ${
+                        tableAvailability === "OCCUPIED"
+                          ? "bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-100"
+                          : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Occupied
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-blue-900/20 hover:from-blue-700 hover:to-indigo-700 transition disabled:opacity-50 cursor-pointer"
+                >
+                  {loading
+                    ? editingTable
+                      ? "Updating Table..."
+                      : "Adding Table..."
+                    : editingTable
+                    ? "Update Table"
+                    : "Create Table"}
+                </button>
+                {editingTable && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="rounded-xl border border-slate-200 px-4 py-3.5 text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </form>
           </div>
 
@@ -221,8 +371,14 @@ function AddTablesPage() {
               <span className="text-[10px] font-extrabold uppercase tracking-widest text-blue-300">
                 Live Table Preview
               </span>
-              <span className="rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
-                AVAILABLE
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${
+                  tableAvailability === "AVAILABLE"
+                    ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-300"
+                    : "bg-amber-500/20 border-amber-400/40 text-amber-300"
+                }`}
+              >
+                {tableAvailability}
               </span>
             </div>
 
@@ -270,7 +426,7 @@ function AddTablesPage() {
               </span>
               <button
                 onClick={() => setSelectedFilterArea("ALL")}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${
+                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
                   selectedFilterArea === "ALL"
                     ? "bg-slate-900 text-white shadow-xs"
                     : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
@@ -284,7 +440,7 @@ function AddTablesPage() {
                   <button
                     key={area._id}
                     onClick={() => setSelectedFilterArea(area._id)}
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
                       selectedFilterArea === area._id
                         ? "bg-blue-600 text-white shadow-xs"
                         : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
@@ -308,7 +464,11 @@ function AddTablesPage() {
               {filteredTables.map((table) => (
                 <div
                   key={table._id}
-                  className="group relative flex flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs transition duration-200 hover:shadow-md hover:border-blue-300"
+                  className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${
+                    editingTable?._id === table._id
+                      ? "border-blue-500 ring-2 ring-blue-200"
+                      : "border-slate-200/80 hover:border-blue-300"
+                  }`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -350,14 +510,76 @@ function AddTablesPage() {
                       </div>
                     </div>
                   </div>
+
+                  <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 text-[11px] text-slate-400">
+                    <span className="font-mono text-[10px]">ID: {table._id.slice(-5)}</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleStartEdit(table)}
+                        title="Edit Table"
+                        className="flex items-center gap-0.5 rounded-lg px-2 py-1 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 transition cursor-pointer"
+                      >
+                        <RiEditLine size={13} />
+                        <span className="text-[10px] font-bold">Edit</span>
+                      </button>
+                      <button
+                        onClick={() => setDeleteModalTable(table)}
+                        title="Delete Table"
+                        className="flex items-center gap-0.5 rounded-lg px-2 py-1 text-slate-500 hover:text-red-600 hover:bg-red-50 border border-slate-200 transition cursor-pointer"
+                      >
+                        <RiDeleteBinLine size={13} />
+                        <span className="text-[10px] font-bold">Del</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalTable && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                <RiDeleteBinLine size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Dining Table</h3>
+                <p className="text-xs text-slate-500">This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to permanently delete table{' '}
+              <strong className="text-slate-900">"{deleteModalTable.tableNumber}"</strong> in section{' '}
+              <strong className="text-slate-900">"{deleteModalTable.areaName?.areaName}"</strong>?
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={() => setDeleteModalTable(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={handleDeleteTable}
+                className="rounded-xl bg-red-600 hover:bg-red-700 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-red-900/20 transition disabled:opacity-50 cursor-pointer"
+              >
+                {deleteLoading ? "Deleting..." : "Yes, Delete Table"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-export default AddTablesPage
+export default AddTablesPage

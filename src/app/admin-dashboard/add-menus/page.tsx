@@ -147,7 +147,7 @@ function AddMenusPage() {
       {/* Main Grid: Form Left, Menu List Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Form & Live Dish Preview Card */}
-        <div className="lg:col-span-5 space-y-6">
+        <div className="lg:col-span-5 lg:sticky lg:top-6 lg:self-start space-y-6 max-h-[calc(100vh-4rem)] overflow-y-auto pr-1">
           <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-5">
             <div className="border-b border-slate-100 pb-3">
               <h2 className="text-lg font-bold text-slate-900">Add Menu Dish</h2>

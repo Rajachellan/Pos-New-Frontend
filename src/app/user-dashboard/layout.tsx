@@ -1,31 +1,12 @@
 import React from 'react'
-import Sidebar from './components/Sidebar';
-import Navbar from './components/Navbar';
+import DashboardLayoutWrapper from './components/DashboardLayoutWrapper';
 
 function layout({
     children,
   }: {
     children: React.ReactNode;
   }) {
-  return (
-    <>
-    
-    <section className='flex min-h-screen'>
-    
-    <Sidebar/>
-
-    <div className='w-full h-full'>
-    <Navbar/>
-    <div>
-    {children}
-    </div>
-    </div>
-
-    </section>
-    
-    
-    </>
-  )
+  return <DashboardLayoutWrapper>{children}</DashboardLayoutWrapper>;
 }
 
 export default layout

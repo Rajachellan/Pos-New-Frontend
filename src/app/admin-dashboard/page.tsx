@@ -13,33 +13,44 @@ import {
   RiStackLine,
   RiArrowRightLine,
   RiCheckboxCircleLine,
+  RiLineChartLine,
 } from 'react-icons/ri'
+import { FaRupeeSign } from 'react-icons/fa'
 import api from '../services/api'
+import { useAuth } from '@/src/app/context/AuthContext'
 
 export default function AdminOverviewPage() {
+  const { user, organizationName, isSuperAdmin } = useAuth()
   const [stats, setStats] = useState({
     branches: 0,
     areas: 0,
     tables: 0,
     menus: 0,
+    revenue: 0,
+    totalOrders: 0,
     loading: true,
   })
 
   useEffect(() => {
     async function fetchDashboardStats() {
       try {
-        const [branchRes, areaRes, tableRes, menuRes] = await Promise.allSettled([
+        const [branchRes, areaRes, tableRes, menuRes, ordersRes] = await Promise.allSettled([
           api.get('/get/branch'),
           api.get('/get/area/all'),
           api.get('/get/all/tables'),
           api.get('/get/menus'),
+          api.get('/orders/history'),
         ])
+
+        const orderData = ordersRes.status === 'fulfilled' ? ordersRes.value.data : null
 
         setStats({
           branches: branchRes.status === 'fulfilled' && branchRes.value.data.data ? branchRes.value.data.data.length : 0,
           areas: areaRes.status === 'fulfilled' && areaRes.value.data.data ? areaRes.value.data.data.length : 0,
           tables: tableRes.status === 'fulfilled' && tableRes.value.data.data ? tableRes.value.data.data.length : 0,
           menus: menuRes.status === 'fulfilled' && menuRes.value.data.data ? menuRes.value.data.data.length : 0,
+          revenue: orderData?.summary?.totalRevenue || 0,
+          totalOrders: orderData?.summary?.totalOrders || 0,
           loading: false,
         })
       } catch (err) {
@@ -51,6 +62,14 @@ export default function AdminOverviewPage() {
   }, [])
 
   const quickActions = [
+    {
+      title: 'Finance & Analytics',
+      description: 'Audit gross revenue, track sales by dining channel, and inspect billing records.',
+      href: '/admin-dashboard/finance',
+      icon: RiLineChartLine,
+      gradient: 'from-emerald-600 to-teal-700',
+      badge: stats.revenue ? `₹${stats.revenue.toLocaleString('en-IN')}` : 'Finance Portal',
+    },
     {
       title: 'Add Branch',
       description: 'Onboard hotel branches, register location details and system codes.',
@@ -103,6 +122,13 @@ export default function AdminOverviewPage() {
 
   const kpiCards = [
     {
+      label: 'Gross Sales (INR)',
+      value: `₹${stats.revenue.toLocaleString('en-IN')}`,
+      icon: FaRupeeSign,
+      color: 'text-emerald-600',
+      bgColor: 'bg-emerald-50',
+    },
+    {
       label: 'Active Branches',
       value: stats.branches,
       icon: RiBuildingLine,
@@ -141,10 +167,10 @@ export default function AdminOverviewPage() {
           <div className="space-y-3 max-w-2xl">
             <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-red-300 backdrop-blur-md border border-white/10">
               <RiShieldUserLine size={16} />
-              <span>Super-Admin Portal</span>
+              <span>{isSuperAdmin() ? 'Super-Admin Portal' : 'Admin Management Console'}</span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-extrabold tracking-tight">
-              Control Center & System Dashboard
+              {organizationName ? `${organizationName} Control Center` : 'Hotel Control Center & Management'}
             </h1>
             <p className="text-sm text-slate-300 leading-relaxed">
               Seamlessly manage your hotel branch hierarchy, configure custom dining layouts, assign floor tables, catalog menu items, and onboard staff accounts across all locations.
@@ -152,6 +178,13 @@ export default function AdminOverviewPage() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0">
+            <Link
+              href="/admin-dashboard/finance"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 transition duration-200"
+            >
+              <RiLineChartLine size={15} />
+              <span>Finances & Sales</span>
+            </Link>
             <Link
               href="/admin-dashboard/add-branch"
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-red-900/40 hover:bg-red-500 transition duration-200"

@@ -1,499 +1,913 @@
-"use client"
+"use client";
 
-import React, { useEffect, useState, useMemo } from 'react'
-import api from '../../services/api'
-import { AxiosError } from 'axios'
-import { useRouter } from 'next/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  PiTableBold, 
-  PiMapPinSimpleAreaFill, 
-  PiChairBold 
-} from "react-icons/pi"
-import { 
-  FiSearch, 
-  FiCheckCircle, 
-  FiClock, 
-  FiRefreshCw, 
-  FiArrowRight, 
-  FiFilter,
-  FiGrid,
-  FiAlertCircle
-} from "react-icons/fi"
-import { MdOutlineMeetingRoom, MdEventSeat } from "react-icons/md"
+import React, { useEffect, useState, useMemo } from "react";
+import api from "../../services/api";
+import { getSocket } from "../../services/socket";
+import { AxiosError } from "axios";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  FiPlus,
+  FiX,
+  FiMoreHorizontal,
+  FiRefreshCw,
+  FiMapPin,
+  FiCheck,
+  FiAlertCircle,
+  FiChevronDown,
+  FiSearch,
+  FiLayers,
+  FiZap,
+} from "react-icons/fi";
+import { MdOutlineTableRestaurant } from "react-icons/md";
 
-interface areaData {
-  areaName: string
-  _id: string
-  areaCode: string
+interface AreaData {
+  _id: string;
+  areaName: string;
+  areaCode?: string;
 }
 
-interface BranchSummary {
-  _id?: string
-  branchName: string
+interface TableData {
+  _id: string;
+  tableNumber: string;
+  areaName:
+    | {
+        _id: string;
+        areaName: string;
+      }
+    | string;
+  availabilityStatus: "AVAILABLE" | "OCCUPIED";
+  createdBy?: string;
 }
 
-interface AreaSummary {
-  _id: string
-  areaName: string
-  branchName?: BranchSummary
-}
+// Helper to extract Area ID safely from table.areaName
+const getTableAreaId = (table: TableData): string => {
+  if (typeof table.areaName === "object" && table.areaName !== null) {
+    return table.areaName._id;
+  }
+  return String(table.areaName || "");
+};
 
-interface TableByBranchResponse {
-  _id: string
-  tableNumber: string
-  areaName: AreaSummary
-  availabilityStatus: "AVAILABLE" | "OCCUPIED"
-  createdBy?: string
-}
+export default function FloorsAndTablesPage() {
+  const router = useRouter();
 
-export default function TablesPage() {
-  const [areaData, setAreaData] = useState<areaData[]>([])
-  const [tableList, setTableList] = useState<TableByBranchResponse[]>([])
-  const [selectedArea, setSelectedArea] = useState<string>("ALL")
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "AVAILABLE" | "OCCUPIED">("ALL")
-  const [searchQuery, setSearchQuery] = useState<string>("")
-  const [loading, setLoading] = useState<boolean>(true)
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
+  const [areas, setAreas] = useState<AreaData[]>([]);
+  const [tables, setTables] = useState<TableData[]>([]);
+  const [selectedAreaId, setSelectedAreaId] = useState<string>("all");
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const router = useRouter()
+  // Modals
+  const [showAddAreaModal, setShowAddAreaModal] = useState(false);
+  const [showAddTableModal, setShowAddTableModal] = useState(false);
 
-  async function getBranchDatasFun() {
+  // Area Action Popover
+  const [activeAreaMenuId, setActiveAreaMenuId] = useState<string | null>(null);
+
+  // Form states
+  const [newAreaName, setNewAreaName] = useState("");
+  const [newAreaCode, setNewAreaCode] = useState("");
+  const [newTableNumber, setNewTableNumber] = useState("");
+  const [newTableAreaId, setNewTableAreaId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  // Custom Dropdown & Helpers
+  const [isAreaDropdownOpen, setIsAreaDropdownOpen] = useState(false);
+  const [areaSearchQuery, setAreaSearchQuery] = useState("");
+
+  // Next suggested table number
+  const suggestedTableNum = useMemo(() => {
+    const targetAreaId = newTableAreaId || (areas.length > 0 ? areas[0]._id : "");
+    if (!targetAreaId) return "T1";
+    const areaTables = tables.filter((t) => getTableAreaId(t) === targetAreaId);
+    const nums = areaTables
+      .map((t) => parseInt(t.tableNumber.replace(/\D/g, ""), 10))
+      .filter((n) => !isNaN(n));
+    const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    return `T${nextNum}`;
+  }, [tables, newTableAreaId, areas]);
+
+  const selectedAreaObj = useMemo(() => {
+    return areas.find((a) => a._id === newTableAreaId) || (areas.length > 0 ? areas[0] : null);
+  }, [areas, newTableAreaId]);
+
+  const filteredModalAreas = useMemo(() => {
+    if (!areaSearchQuery.trim()) return areas;
+    const q = areaSearchQuery.toLowerCase();
+    return areas.filter(
+      (a) =>
+        a.areaName.toLowerCase().includes(q) ||
+        (a.areaCode && a.areaCode.toLowerCase().includes(q))
+    );
+  }, [areas, areaSearchQuery]);
+
+  // Fetch Areas
+  async function fetchAreas() {
     try {
-      const res = await api.get('/get/area/branch')
-      const data = Array.isArray(res?.data?.data) ? res.data.data : []
-      setAreaData(data)
+      const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      const branchQuery = savedBranchId && savedBranchId !== "ALL" ? `?branchId=${savedBranchId}` : "";
+      const res = await api.get(`/get/area/branch${branchQuery}`);
+      const data = Array.isArray(res?.data?.data) ? res.data.data : [];
+      setAreas(data);
+      if (data.length > 0 && !newTableAreaId) {
+        setNewTableAreaId(data[0]._id);
+      }
     } catch (err) {
-      const error = err as AxiosError<{ message?: string }>
-      console.error(error.response?.data?.message || error.message)
+      console.error("Error fetching areas", err);
     }
   }
 
-  async function getAllTablesFun() {
-    setLoading(true)
+  // Fetch Tables
+  async function fetchTables() {
     try {
-      const res = await api.get('/get/all/tables')
-      const data = Array.isArray(res?.data?.data) ? res.data.data : []
-      setTableList(data)
+      const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      const branchQuery = savedBranchId && savedBranchId !== "ALL" ? `?branchId=${savedBranchId}` : "";
+      const res = await api.get(`/get/tables/branch${branchQuery}`);
+      const data = Array.isArray(res?.data?.data) ? res.data.data : [];
+      setTables(data);
     } catch (err) {
-      const error = err as AxiosError<{ message?: string }>
-      console.error(error.response?.data?.message || error.message)
-    } finally {
-      setLoading(false)
+      console.error("Error fetching tables", err);
     }
   }
 
-  async function getTableByAreaFun(id: string) {
-    setLoading(true)
-    try {
-      const res = await api.get(`/get/tables/area/${id}`)
-      const data = Array.isArray(res?.data?.data) ? res.data.data : []
-      setTableList(data)
-    } catch (err) {
-      const error = err as AxiosError<{ message?: string }>
-      console.error(error.response?.data?.message || error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function getTableByBranch() {
-    setLoading(true)
-    try {
-      const res = await api.get('/get/tables/branch')
-      const data = Array.isArray(res?.data?.data) ? res.data.data : []
-      setTableList(data)
-    } catch (err) {
-      const error = err as AxiosError<{ message?: string }>
-      console.error(error.response?.data?.message || error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true)
-    if (selectedArea === "ALL") {
-      await getTableByBranch()
-    } else {
-      await getTableByAreaFun(selectedArea)
-    }
-    await getBranchDatasFun()
-    setTimeout(() => setIsRefreshing(false), 500)
+  async function loadData() {
+    setLoading(true);
+    await Promise.all([fetchAreas(), fetchTables()]);
+    setLoading(false);
   }
 
   useEffect(() => {
-    getBranchDatasFun()
-    getTableByBranch()
-  }, [])
+    loadData();
 
-  // Filtered table data based on area, status, and search query
-  const filteredTables = useMemo(() => {
-    return tableList.filter((table) => {
-      const matchesSearch =
-        searchQuery === "" ||
-        table.tableNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        table.areaName?.areaName?.toLowerCase().includes(searchQuery.toLowerCase())
+    const socket = getSocket();
+    const handleTableUpdated = (data: { tableId: string; availabilityStatus: "AVAILABLE" | "OCCUPIED" }) => {
+      if (!data?.tableId) return;
+      setTables((prev) =>
+        prev.map((t) => (t._id === data.tableId ? { ...t, availabilityStatus: data.availabilityStatus } : t))
+      );
+    };
 
-      const matchesStatus =
-        statusFilter === "ALL" || table.availabilityStatus === statusFilter
+    const handleBranchChange = () => {
+      loadData();
+    };
 
-      return matchesSearch && matchesStatus
-    })
-  }, [tableList, searchQuery, statusFilter])
+    socket.on("table_updated", handleTableUpdated);
+    window.addEventListener("pos_branch_changed", handleBranchChange);
 
-  // Stats calculation
-  const totalTables = tableList.length
-  const availableCount = tableList.filter(t => t.availabilityStatus === "AVAILABLE").length
-  const occupiedCount = tableList.filter(t => t.availabilityStatus === "OCCUPIED").length
-  const occupancyRate = totalTables > 0 ? Math.round((occupiedCount / totalTables) * 100) : 0
+    return () => {
+      socket.off("table_updated", handleTableUpdated);
+      window.removeEventListener("pos_branch_changed", handleBranchChange);
+    };
+  }, []);
+
+  const handleReleaseTable = async (tableId: string, tableNumber: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await api.post(`/tables/${tableId}/release`);
+      setTables((prev) =>
+        prev.map((t) => (t._id === tableId ? { ...t, availabilityStatus: "AVAILABLE" } : t))
+      );
+    } catch (err) {
+      console.error("Failed to release table:", err);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await Promise.all([fetchAreas(), fetchTables()]);
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
+
+  // Helper to extract Area Name safely
+  const getTableAreaName = (table: TableData): string => {
+    if (typeof table.areaName === "object" && table.areaName !== null) {
+      return table.areaName.areaName;
+    }
+    const matched = areas.find((a) => a._id === table.areaName);
+    return matched ? matched.areaName : "DINING";
+  };
+
+  // Group tables by area
+  const groupedAreas = useMemo(() => {
+    return areas.map((area) => {
+      const areaTables = tables.filter((t) => {
+        const aId = getTableAreaId(t);
+        return aId === area._id;
+      });
+
+      // Sort tables naturally (T1, T2, T3...)
+      const sortedTables = [...areaTables].sort((a, b) => {
+        const numA = parseInt(a.tableNumber.replace(/\D/g, "")) || 0;
+        const numB = parseInt(b.tableNumber.replace(/\D/g, "")) || 0;
+        return numA - numB;
+      });
+
+      return {
+        area,
+        tables: sortedTables,
+      };
+    });
+  }, [areas, tables]);
+
+  // Overall counts
+  const totalTables = tables.length;
+  const availableCount = tables.filter(
+    (t) => t.availabilityStatus === "AVAILABLE"
+  ).length;
+  const occupiedCount = tables.filter(
+    (t) => t.availabilityStatus === "OCCUPIED"
+  ).length;
+
+  // Filtered list of area sections to display
+  const displayedSections = useMemo(() => {
+    if (selectedAreaId === "all") {
+      return groupedAreas;
+    }
+    return groupedAreas.filter((g) => g.area._id === selectedAreaId);
+  }, [groupedAreas, selectedAreaId]);
+
+  // Add Area Form Submit
+  async function handleCreateArea(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newAreaName.trim()) return;
+    setIsSubmitting(true);
+    setFormError("");
+    try {
+      const code =
+        newAreaCode.trim() ||
+        newAreaName
+          .trim()
+          .slice(0, 3)
+          .toUpperCase();
+
+      await api.post("/add/area", {
+        areaName: newAreaName.trim(),
+        areaCode: code,
+      });
+
+      setNewAreaName("");
+      setNewAreaCode("");
+      setShowAddAreaModal(false);
+      await fetchAreas();
+    } catch (err) {
+      const axiosError = err as AxiosError<{ message?: string }>;
+      setFormError(axiosError.response?.data?.message || "Failed to create area");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // Add Table Form Submit
+  async function handleCreateTable(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newTableNumber.trim() || !newTableAreaId) return;
+    setIsSubmitting(true);
+    setFormError("");
+    try {
+      const formattedNum = newTableNumber.trim().toUpperCase().startsWith("T")
+        ? newTableNumber.trim().toUpperCase()
+        : `T${newTableNumber.trim()}`;
+
+      await api.post("/add/tables", {
+        tableNumber: formattedNum,
+        areaName: newTableAreaId,
+      });
+
+      setNewTableNumber("");
+      setShowAddTableModal(false);
+      await fetchTables();
+    } catch (err) {
+      const axiosError = err as AxiosError<{ message?: string }>;
+      setFormError(axiosError.response?.data?.message || "Failed to create table");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50/60 p-4 lg:p-8 space-y-6">
-      
-      {/* 1. TOP HEADER & REFRESH */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-xs">
+    <div className="p-6 md:p-8 bg-[#f8fafc] min-h-screen text-slate-800">
+      {/* 1. Header Row (Title, Subtitle & Top Right Action Buttons) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="bg-red-50 text-[#e02424] px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-              <PiTableBold className="text-sm" /> Floor Plan & Orders
-            </span>
-            <span className="text-slate-300">•</span>
-            <span className="text-xs font-semibold text-slate-500">Live Management</span>
-          </div>
-          <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Dining Tables Overview
+          <h1 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">
+            Floors & Tables
           </h1>
-          <p className="text-slate-500 text-sm mt-0.5">
-            Select a table to manage guest seating or take orders instantly.
+          <p className="text-xs md:text-sm text-gray-500 mt-1">
+            Manage your restaurant floors, areas and tables
           </p>
         </div>
 
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="inline-flex items-center gap-2 self-start md:self-auto bg-slate-900 hover:bg-[#e02424] text-white px-5 py-2.5 rounded-2xl text-xs font-bold transition-all duration-300 shadow-md hover:shadow-lg active:scale-95 disabled:opacity-50"
-        >
-          <FiRefreshCw className={`text-sm ${isRefreshing ? "animate-spin" : ""}`} />
-          {isRefreshing ? "Refreshing..." : "Refresh Floor"}
-        </button>
-      </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setFormError("");
+              setShowAddAreaModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-800 hover:bg-gray-50 transition shadow-2xs cursor-pointer active:scale-95"
+          >
+            <FiPlus size={15} /> New Area
+          </button>
 
-      {/* 2. DASHBOARD STATS BAR */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Tables */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Tables</p>
-            <h3 className="text-2xl lg:text-3xl font-extrabold text-slate-900 mt-1">{totalTables}</h3>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center">
-            <FiGrid size={22} />
-          </div>
-        </div>
-
-        {/* Available Tables */}
-        <div className="bg-white p-5 rounded-2xl border border-emerald-100/80 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">Available Now</p>
-            <h3 className="text-2xl lg:text-3xl font-extrabold text-emerald-600 mt-1">{availableCount}</h3>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center relative">
-            <span className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
-            <FiCheckCircle size={22} />
-          </div>
-        </div>
-
-        {/* Occupied Tables */}
-        <div className="bg-white p-5 rounded-2xl border border-rose-100/80 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-[#e02424]">Occupied</p>
-            <h3 className="text-2xl lg:text-3xl font-extrabold text-[#e02424] mt-1">{occupiedCount}</h3>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-red-50 text-[#e02424] flex items-center justify-center">
-            <MdEventSeat size={24} />
-          </div>
-        </div>
-
-        {/* Occupancy Rate */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Occupancy Rate</p>
-            <span className="text-xs font-extrabold text-slate-700">{occupancyRate}%</span>
-          </div>
-          <div className="mt-3">
-            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-[#e02424] rounded-full transition-all duration-500"
-                style={{ width: `${occupancyRate}%` }}
-              />
-            </div>
-          </div>
+          <button
+            onClick={() => {
+              setFormError("");
+              setShowAddTableModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer active:scale-95"
+          >
+            <FiPlus size={15} /> New Table
+          </button>
         </div>
       </div>
 
-      {/* 3. TOOLBAR & AREA SELECTION */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xs space-y-5">
-        
-        {/* Search & Status Filters Header */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-          
-          {/* Search Box */}
-          <div className="relative flex-1 max-w-md">
-            <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-base" />
-            <input
-              type="text"
-              placeholder="Search table number or area..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424] transition"
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-slate-600 bg-slate-200 rounded-full h-5 w-5 flex items-center justify-center"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+      {/* 2. Floor / Area Filter Pills Bar + Status Counts */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+        {/* Left Side: Filter Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
+          {/* All Areas Pill */}
+          <button
+            onClick={() => setSelectedAreaId("all")}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+              selectedAreaId === "all"
+                ? "bg-[#e02424] text-white shadow-xs"
+                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            All Areas ({totalTables})
+          </button>
 
-          {/* Status Filter Tabs */}
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl self-start lg:self-auto">
-            <button
-              onClick={() => setStatusFilter("ALL")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                statusFilter === "ALL"
-                  ? "bg-white text-slate-900 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              All Statuses
-            </button>
-            <button
-              onClick={() => setStatusFilter("AVAILABLE")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                statusFilter === "AVAILABLE"
-                  ? "bg-emerald-500 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span className={`h-2 w-2 rounded-full ${statusFilter === "AVAILABLE" ? "bg-white" : "bg-emerald-500"}`} />
-              Available
-            </button>
-            <button
-              onClick={() => setStatusFilter("OCCUPIED")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                statusFilter === "OCCUPIED"
-                  ? "bg-[#e02424] text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span className={`h-2 w-2 rounded-full ${statusFilter === "OCCUPIED" ? "bg-white" : "bg-red-500"}`} />
-              Occupied
-            </button>
-          </div>
-        </div>
-
-        <div className="h-px bg-slate-100" />
-
-        {/* Area Pills Header */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <PiMapPinSimpleAreaFill className="text-[#e02424] text-base" />
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Filter By Area
-              </h2>
-            </div>
-            <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full">
-              {areaData.length} Dining Areas
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all duration-200 flex items-center gap-2 border ${
-                selectedArea === "ALL"
-                  ? "bg-[#e02424] text-white border-[#e02424] shadow-md shadow-red-500/20 scale-102"
-                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
-              }`}
-              onClick={() => {
-                setSelectedArea("ALL")
-                getAllTablesFun()
-              }}
-            >
-              <span>All Areas</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                selectedArea === "ALL" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
-              }`}>
-                {tableList.length}
-              </span>
-            </button>
-
-            {areaData.map((area) => (
+          {/* Area Specific Pills */}
+          {groupedAreas.map((g) => {
+            const isSelected = selectedAreaId === g.area._id;
+            return (
               <button
-                type="button"
-                key={area._id}
-                className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all duration-200 flex items-center gap-2 border ${
-                  selectedArea === area._id
-                    ? "bg-[#e02424] text-white border-[#e02424] shadow-md shadow-red-500/20 scale-102"
-                    : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
+                key={g.area._id}
+                onClick={() => setSelectedAreaId(g.area._id)}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                  isSelected
+                    ? "bg-[#e02424] text-white shadow-xs"
+                    : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
                 }`}
-                onClick={() => {
-                  setSelectedArea(area._id)
-                  getTableByAreaFun(area._id)
-                }}
               >
-                <span>{area.areaName}</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                  selectedArea === area._id ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
-                }`}>
-                  {area.areaCode}
-                </span>
+                {g.area.areaName} ({g.tables.length})
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
+        {/* Right Side: Available & Occupied Legend */}
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-gray-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+            <span>Available ({availableCount})</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs font-bold text-gray-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+            <span>Occupied ({occupiedCount})</span>
+          </div>
+
+          <button
+            onClick={handleRefresh}
+            className="p-1.5 text-gray-400 hover:text-gray-700 transition"
+            title="Refresh Feed"
+          >
+            <FiRefreshCw className={isRefreshing ? "animate-spin" : ""} size={14} />
+          </button>
+        </div>
       </div>
 
-      {/* 4. TABLE CARDS GRID */}
+      {/* 3. FLOOR DIVIDED SECTIONS */}
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 lg:gap-5">
-          {Array.from({ length: 12 }).map((_, index) => (
-            <div 
-              key={index}
-              className="h-44 rounded-3xl bg-white border border-slate-100 p-5 animate-pulse flex flex-col justify-between"
-            >
-              <div className="flex items-center justify-between">
-                <div className="h-9 w-9 bg-slate-100 rounded-2xl" />
-                <div className="h-6 w-16 bg-slate-100 rounded-full" />
+        <div className="space-y-8">
+          {[1, 2, 3].map((n) => (
+            <div key={n} className="space-y-3">
+              <div className="w-48 h-6 bg-gray-200 rounded-md animate-pulse" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div
+                    key={i}
+                    className="h-32 bg-white rounded-2xl border border-gray-200 animate-pulse"
+                  />
+                ))}
               </div>
-              <div className="space-y-2">
-                <div className="h-6 w-20 bg-slate-100 rounded-md" />
-                <div className="h-4 w-28 bg-slate-100 rounded-md" />
-              </div>
-              <div className="h-8 w-full bg-slate-100 rounded-xl" />
             </div>
           ))}
         </div>
-      ) : filteredTables.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-100 p-12 text-center space-y-4 max-w-md mx-auto my-8 shadow-xs">
-          <div className="h-16 w-16 bg-red-50 text-[#e02424] rounded-full flex items-center justify-center mx-auto text-2xl">
+      ) : displayedSections.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center max-w-md mx-auto space-y-4">
+          <div className="w-14 h-14 rounded-full bg-red-50 text-[#e02424] flex items-center justify-center mx-auto text-2xl">
             <FiAlertCircle />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-900">No Tables Found</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              No dining tables match your selected filters or search query.
+            <h3 className="text-lg font-bold text-gray-900">No Areas Found</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Start by creating your restaurant's first floor or dining zone.
             </p>
           </div>
           <button
-            onClick={() => {
-              setSelectedArea("ALL")
-              setStatusFilter("ALL")
-              setSearchQuery("")
-              getAllTablesFun()
-            }}
-            className="px-4 py-2 bg-slate-900 text-white rounded-2xl text-xs font-bold hover:bg-[#e02424] transition-colors"
+            onClick={() => setShowAddAreaModal(true)}
+            className="px-5 py-2.5 bg-[#e02424] text-white rounded-xl text-xs font-bold hover:bg-red-700 transition"
           >
-            Reset All Filters
+            + Create New Area
           </button>
         </div>
       ) : (
-        <motion.div 
-          layout
-          className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 lg:gap-5"
-        >
-          <AnimatePresence>
-            {filteredTables.map((table) => {
-              const isAvailable = table.availabilityStatus === "AVAILABLE"
+        <div className="space-y-8">
+          {displayedSections.map(({ area, tables: areaTables }) => (
+            <div key={area._id} className="space-y-3">
+              {/* Section Header Matching Screenshot: | AC Room 6 Tables ... */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  {/* Red vertical bar */}
+                  <span className="w-1 h-5 bg-[#e02424] rounded-full mr-2.5 inline-block" />
+                  <h2 className="text-base font-bold text-gray-900">
+                    {area.areaName}
+                  </h2>
+                  <span className="text-xs text-gray-400 font-medium ml-2.5">
+                    {areaTables.length} {areaTables.length === 1 ? "Table" : "Tables"}
+                  </span>
+                </div>
 
-              return (
-                <motion.article
-                  layout
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.2 }}
-                  key={table._id}
-                  onClick={() => router.push(`/user-dashboard/menus?tableId=${table._id}`)}
-                  className={`group relative flex flex-col justify-between rounded-3xl bg-white p-5 border shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl cursor-pointer overflow-hidden ${
-                    isAvailable
-                      ? "border-slate-100 hover:border-emerald-400/50 hover:shadow-emerald-500/10"
-                      : "border-slate-100 hover:border-rose-400/50 hover:shadow-rose-500/10"
-                  }`}
-                >
-                  {/* Top Status Accent Bar */}
-                  <div 
-                    className={`absolute top-0 left-0 right-0 h-1.5 transition-colors ${
-                      isAvailable ? "bg-emerald-500" : "bg-[#e02424]"
-                    }`}
-                  />
+                {/* Three dots menu */}
+                <div className="relative">
+                  <button
+                    onClick={() =>
+                      setActiveAreaMenuId(
+                        activeAreaMenuId === area._id ? null : area._id
+                      )
+                    }
+                    className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+                    title="Area Options"
+                  >
+                    <FiMoreHorizontal size={18} />
+                  </button>
 
-                  {/* Header: Table Icon & Status Badge */}
-                  <div className="flex items-center justify-between mt-1">
-                    <div className={`h-10 w-10 rounded-2xl flex items-center justify-center font-black transition-colors ${
-                      isAvailable 
-                        ? "bg-emerald-50 text-emerald-600 group-hover:bg-emerald-500 group-hover:text-white" 
-                        : "bg-red-50 text-[#e02424] group-hover:bg-[#e02424] group-hover:text-white"
-                    }`}>
-                      <PiTableBold size={20} />
+                  {activeAreaMenuId === area._id && (
+                    <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl border border-gray-200 shadow-lg py-1 z-20">
+                      <button
+                        onClick={() => {
+                          setNewTableAreaId(area._id);
+                          setActiveAreaMenuId(null);
+                          setShowAddTableModal(true);
+                        }}
+                        className="w-full text-left px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                      >
+                        <FiPlus className="text-[#e02424]" /> Add Table here
+                      </button>
                     </div>
+                  )}
+                </div>
+              </div>
 
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-extrabold tracking-wide uppercase ${
-                        isAvailable
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                          : "bg-red-50 text-[#e02424] border border-red-200"
-                      }`}
-                    >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          isAvailable ? "bg-emerald-500 animate-pulse" : "bg-[#e02424]"
-                        }`}
-                      />
-                      {table.availabilityStatus}
-                    </span>
-                  </div>
+              {/* Table Grid for this specific floor/area */}
+              {areaTables.length === 0 ? (
+                <div className="p-6 bg-white rounded-2xl border border-dashed border-gray-200 text-center">
+                  <p className="text-xs text-gray-400">
+                    No tables configured in {area.areaName}.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setNewTableAreaId(area._id);
+                      setShowAddTableModal(true);
+                    }}
+                    className="mt-2 text-xs font-bold text-[#e02424] hover:underline cursor-pointer"
+                  >
+                    + Add First Table
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  {areaTables.map((table) => {
+                    const isOccupied = table.availabilityStatus === "OCCUPIED";
+                    const formattedNum = table.tableNumber
+                      .toUpperCase()
+                      .startsWith("T")
+                      ? table.tableNumber.toUpperCase()
+                      : `T${table.tableNumber}`;
 
-                  {/* Body: Table Number & Area Name */}
-                  <div className="my-4 space-y-1">
-                    <h3 className="text-xl lg:text-2xl font-black text-slate-900 group-hover:text-[#e02424] transition-colors flex items-baseline gap-1">
-                      <span>Table</span>
-                      <span className="text-[#e02424]">{table.tableNumber}</span>
-                    </h3>
+                    const areaDisplayName = getTableAreaName(table);
 
-                    <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-bold">
-                      <PiMapPinSimpleAreaFill className="text-slate-400 shrink-0" />
-                      <span className="truncate uppercase tracking-wide">
-                        {table.areaName?.areaName || "Main Hall"}
-                      </span>
-                    </div>
-                  </div>
+                    return (
+                      <div
+                        key={table._id}
+                        onClick={() =>
+                          router.push(
+                            `/user-dashboard/menus?tableId=${table._id}&tableNumber=${table.tableNumber}`
+                          )
+                        }
+                        className="group bg-white rounded-2xl border border-gray-200/90 p-4 shadow-2xs hover:shadow-md transition cursor-pointer flex flex-col justify-between h-[135px] hover:border-[#e02424]/40"
+                      >
+                        {/* Top Row: Table Number + Status Dot */}
+                        <div className="flex items-start justify-between">
+                          <span className="text-lg font-black text-gray-900 group-hover:text-[#e02424] transition">
+                            {formattedNum}
+                          </span>
+                          <span
+                            className={`w-2.5 h-2.5 rounded-full ${
+                              isOccupied ? "bg-red-500" : "bg-emerald-500"
+                            }`}
+                          />
+                        </div>
 
-                  {/* Footer Action CTA */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-400 group-hover:text-slate-700 transition-colors">
-                      {isAvailable ? "Take Order" : "View Order"}
-                    </span>
-                    <div className={`h-7 w-7 rounded-xl flex items-center justify-center transition-all ${
-                      isAvailable
-                        ? "bg-slate-100 text-slate-600 group-hover:bg-emerald-500 group-hover:text-white"
-                        : "bg-slate-100 text-slate-600 group-hover:bg-[#e02424] group-hover:text-white"
-                    }`}>
-                      <FiArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                    </div>
-                  </div>
-                </motion.article>
-              )
-            })}
-          </AnimatePresence>
-        </motion.div>
+                        {/* Middle Row: Area Tag */}
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          <FiMapPin size={11} className="shrink-0" />
+                          <span className="truncate">{areaDisplayName}</span>
+                        </div>
+
+                        {/* Bottom Row: Status Badge + Free Table Action */}
+                        <div>
+                          {isOccupied ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="bg-red-50 text-red-600 border border-red-100 rounded-lg py-1 text-[10px] font-bold tracking-wider uppercase text-center flex-1 block">
+                                OCCUPIED
+                              </span>
+                              <button
+                                type="button"
+                                title="Free / Release Table"
+                                onClick={(e) => handleReleaseTable(table._id, table.tableNumber, e)}
+                                className="px-2 py-1 bg-gray-100 hover:bg-rose-50 text-gray-700 hover:text-rose-700 rounded-lg text-[10px] font-bold border border-gray-200 transition shrink-0"
+                              >
+                                Free
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg py-1 text-[10px] font-bold tracking-wider uppercase text-center w-full block">
+                              AVAILABLE
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
+      {/* 4. NEW AREA MODAL */}
+      <AnimatePresence>
+        {showAddAreaModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-3xl w-full max-w-md p-6 sm:p-7 shadow-2xl border border-gray-100 space-y-6"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-red-50 text-[#e02424] flex items-center justify-center font-bold text-lg shrink-0">
+                    <FiLayers size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-gray-900 tracking-tight">New Floor / Zone</h3>
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">
+                      Zone Configuration
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAddAreaModal(false)}
+                  className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+                >
+                  <FiX size={18} />
+                </button>
+              </div>
+
+              {/* Quick Presets */}
+              <div>
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                  Quick Presets
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { name: "Ground Floor", code: "GF" },
+                    { name: "1st Floor", code: "1F" },
+                    { name: "2nd Floor", code: "2F" },
+                    { name: "Rooftop Lounge", code: "RT" },
+                    { name: "AC Dining", code: "AC" },
+                    { name: "Outdoor Patio", code: "OD" },
+                  ].map((preset) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => {
+                        setNewAreaName(preset.name);
+                        setNewAreaCode(preset.code);
+                      }}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-red-50 hover:text-red-700 hover:border-red-200 border border-transparent text-gray-700 transition cursor-pointer"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {formError && (
+                <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <FiAlertCircle className="shrink-0 text-red-500" size={16} />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleCreateArea} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    Area Name
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                      <FiMapPin size={16} />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Garden, Roof Top, 3rd Floor"
+                      value={newAreaName}
+                      onChange={(e) => {
+                        setNewAreaName(e.target.value);
+                        if (!newAreaCode) {
+                          setNewAreaCode(
+                            e.target.value
+                              .replace(/[^a-zA-Z0-9]/g, "")
+                              .slice(0, 3)
+                              .toUpperCase()
+                          );
+                        }
+                      }}
+                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium focus:outline-hidden focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    Area Code (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. GD, RT, 3F"
+                    value={newAreaCode}
+                    onChange={(e) => setNewAreaCode(e.target.value.toUpperCase())}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium focus:outline-hidden focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">Short identifier used on tickets and floor maps</p>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddAreaModal(false)}
+                    className="px-4 py-2.5 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-500/20 disabled:opacity-50 cursor-pointer active:scale-95"
+                  >
+                    {isSubmitting ? "Creating..." : "Create Area"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5. NEW TABLE MODAL (CUSTOM DROPDOWN & LIVE PREVIEW) */}
+      <AnimatePresence>
+        {showAddTableModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-3xl w-full max-w-md p-6 sm:p-7 shadow-2xl border border-gray-100 space-y-5"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-red-50 text-[#e02424] flex items-center justify-center font-bold text-lg shrink-0">
+                    <MdOutlineTableRestaurant size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-gray-900 tracking-tight">New Table</h3>
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">
+                      Capacity Expansion
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowAddTableModal(false);
+                    setIsAreaDropdownOpen(false);
+                  }}
+                  className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+                >
+                  <FiX size={18} />
+                </button>
+              </div>
+
+              {formError && (
+                <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <FiAlertCircle className="shrink-0 text-red-500" size={16} />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleCreateTable} className="space-y-4">
+                {/* Table Number Field with Auto Suggest */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Table Number / ID
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setNewTableNumber(suggestedTableNum)}
+                      className="text-[11px] font-bold text-[#e02424] hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1 transition cursor-pointer"
+                      title="Use next available number in this area"
+                    >
+                      <FiZap size={11} />
+                      <span>Suggest: {suggestedTableNum}</span>
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 font-bold text-sm">
+                      #
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. 15, T7"
+                      value={newTableNumber}
+                      onChange={(e) => setNewTableNumber(e.target.value)}
+                      className="w-full pl-8 pr-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-900 focus:outline-hidden focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Custom Area Selection Dropdown (No ugly OS native select!) */}
+                <div className="relative">
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    Area / Floor Selection
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsAreaDropdownOpen(!isAreaDropdownOpen)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 bg-white hover:border-gray-300 text-sm font-medium flex items-center justify-between transition cursor-pointer shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  >
+                    <div className="flex items-center gap-2.5 truncate">
+                      <FiMapPin className="text-[#e02424] shrink-0" size={16} />
+                      <span className="font-bold text-gray-800 truncate">
+                        {selectedAreaObj ? selectedAreaObj.areaName : "Select an Area"}
+                      </span>
+                      {selectedAreaObj?.areaCode && (
+                        <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold">
+                          {selectedAreaObj.areaCode}
+                        </span>
+                      )}
+                    </div>
+                    <FiChevronDown
+                      className={`text-gray-400 transition-transform duration-200 shrink-0 ${
+                        isAreaDropdownOpen ? "rotate-180" : ""
+                      }`}
+                      size={16}
+                    />
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  <AnimatePresence>
+                    {isAreaDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 p-2 max-h-56 overflow-y-auto"
+                      >
+                        {areas.length > 4 && (
+                          <div className="relative mb-2 px-1">
+                            <FiSearch className="absolute left-3.5 top-2.5 text-gray-400" size={13} />
+                            <input
+                              type="text"
+                              placeholder="Search floor or area..."
+                              value={areaSearchQuery}
+                              onChange={(e) => setAreaSearchQuery(e.target.value)}
+                              className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 rounded-lg border border-gray-200 focus:outline-hidden focus:border-red-500"
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-1">
+                          {filteredModalAreas.map((area) => {
+                            const isSelected = (newTableAreaId || areas[0]?._id) === area._id;
+                            const tableCount = tables.filter((t) => getTableAreaId(t) === area._id).length;
+
+                            return (
+                              <button
+                                key={area._id}
+                                type="button"
+                                onClick={() => {
+                                  setNewTableAreaId(area._id);
+                                  setIsAreaDropdownOpen(false);
+                                }}
+                                className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between transition cursor-pointer ${
+                                  isSelected
+                                    ? "bg-red-50 text-[#e02424] font-bold"
+                                    : "text-gray-700 hover:bg-gray-50"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 truncate">
+                                  <span className="truncate">{area.areaName}</span>
+                                  {area.areaCode && (
+                                    <span className="px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 text-[10px] font-bold">
+                                      {area.areaCode}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="text-[10px] text-gray-400">
+                                    {tableCount} {tableCount === 1 ? "table" : "tables"}
+                                  </span>
+                                  {isSelected && <FiCheck className="text-[#e02424]" size={14} />}
+                                </div>
+                              </button>
+                            );
+                          })}
+                          {filteredModalAreas.length === 0 && (
+                            <p className="text-center py-3 text-xs text-gray-400">No areas found</p>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Live Card Preview */}
+                <div className="rounded-2xl border border-gray-100 bg-slate-50/70 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    <span>Live Preview</span>
+                    <span className="text-emerald-600 font-extrabold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                      Default: AVAILABLE
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200/80 p-3 shadow-2xs flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-red-50 text-[#e02424] flex items-center justify-center font-black text-sm border border-red-100">
+                        {newTableNumber
+                          ? newTableNumber.toUpperCase().startsWith("T")
+                            ? newTableNumber.toUpperCase()
+                            : `T${newTableNumber}`
+                          : suggestedTableNum}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-gray-900">
+                          {selectedAreaObj?.areaName || "Selected Area"}
+                        </p>
+                        <p className="text-[10px] text-gray-400 font-medium">Ready for immediate diner seating</p>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-100">
+                      AVAILABLE
+                    </span>
+                  </div>
+                </div>
+
+                {/* Form Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddTableModal(false);
+                      setIsAreaDropdownOpen(false);
+                    }}
+                    className="px-4 py-2.5 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-500/20 disabled:opacity-50 cursor-pointer active:scale-95"
+                  >
+                    {isSubmitting ? "Creating..." : "Create Table"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
-  )
+  );
 }

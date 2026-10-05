@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   description: "Hotel Management System New - Pet Pooja",
 };
 
+import { AuthProvider } from "@/src/app/context/AuthContext";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -14,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
