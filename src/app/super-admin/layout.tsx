@@ -25,16 +25,19 @@ export default function SuperAdminLayout({
 
   if (loading || !user || !isSuperAdmin()) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-sm">
-        Verifying Super Admin Authorization...
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center text-slate-500 text-sm gap-3">
+        <div className="w-10 h-10 border-3 border-red-200 border-t-[#e02424] rounded-full animate-spin"></div>
+        <p className="font-medium text-xs tracking-wider uppercase text-slate-400">
+          Verifying Super Admin Authorization...
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-900 text-slate-100">
+    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900 font-sans antialiased">
       <SuperAdminSidebar />
-      <main className="flex-1 overflow-y-auto min-h-screen bg-slate-950 p-8">
+      <main className="flex-1 overflow-y-auto min-h-screen bg-[#F8FAFC] p-6 lg:p-8">
         {children}
       </main>
     </div>

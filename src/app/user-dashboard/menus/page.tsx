@@ -110,18 +110,44 @@ function MenusContent() {
   const [paidOrderData, setPaidOrderData] = useState<CartData | null>(null)
   const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null)
 
+  // Safe table display number
+  const tableDisplayNum = table?.tableNumber
+    ? (table.tableNumber.toUpperCase().startsWith("T") ? table.tableNumber.toUpperCase() : `T${table.tableNumber}`)
+    : (searchParams.get("tableNumber")
+      ? (searchParams.get("tableNumber")!.toUpperCase().startsWith("T") ? searchParams.get("tableNumber")!.toUpperCase() : `T${searchParams.get("tableNumber")}`)
+      : "T1")
+
+  // Reliable navigation to Floors & Tables with fallback
+  const navigateToTables = (flashMsg?: string) => {
+    if (typeof window !== 'undefined' && flashMsg) {
+      sessionStorage.setItem('pos_flash_message', flashMsg)
+    }
+    try {
+      router.replace('/user-dashboard/tables')
+    } catch (err) {
+      console.error("Navigation error:", err)
+    }
+    setTimeout(() => {
+      if (typeof window !== 'undefined' && window.location.pathname.includes('/menus')) {
+        window.location.href = '/user-dashboard/tables'
+      }
+    }, 120)
+  }
+
   // Auto redirect countdown to Tables page after successful payment
   useEffect(() => {
     if (redirectCountdown === null) return
     if (redirectCountdown <= 0) {
-      router.push('/user-dashboard/tables')
+      setRedirectCountdown(null)
+      setPaymentSuccess(false)
+      navigateToTables(`Payment recorded for Table ${tableDisplayNum}. Table is now free and available.`)
       return
     }
     const timer = setTimeout(() => {
       setRedirectCountdown((prev) => (prev !== null ? prev - 1 : null))
     }, 1000)
     return () => clearTimeout(timer)
-  }, [redirectCountdown, router])
+  }, [redirectCountdown, tableDisplayNum])
 
   // Fetch Menu Items
   async function fetchMenus() {
@@ -384,7 +410,7 @@ function MenusContent() {
         })
         setShowPaymentModal(false)
         setPaymentSuccess(true)
-        setRedirectCountdown(3) // 3-second auto-redirect countdown
+        setRedirectCountdown(2) // 2-second snappy auto-redirect countdown
         await fetchTables()
       }
     } catch (err) {
@@ -396,22 +422,18 @@ function MenusContent() {
     }
   }
 
-  // Release table manually
+  // Release table manually and redirect to floor plan
   async function handleReleaseTable() {
     if (!activeTableId) return
     try {
       await api.post(`/tables/${activeTableId}/release`)
-      await fetchTables()
-      await fetchCart(activeTableId)
+      navigateToTables(`Table ${tableDisplayNum} released and ready for next customer.`)
     } catch (err) {
       console.error("Failed to release table", err)
+      alert("Failed to release table. Please try again.")
     }
   }
 
-  // Table label
-  const tableDisplayNum = table?.tableNumber
-    ? (table.tableNumber.toUpperCase().startsWith("T") ? table.tableNumber.toUpperCase() : `T${table.tableNumber}`)
-    : "T1"
   const areaDisplayName = table?.areaName?.areaName || "Dining Area"
   const orderIdNumber = cart.orderNumber || (cart._id ? `#${cart._id.slice(-4).toUpperCase()}` : "#50")
 
@@ -440,6 +462,15 @@ function MenusContent() {
             </h2>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigateToTables()}
+                className="text-xs font-bold text-gray-700 hover:text-slate-900 transition flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 shadow-2xs cursor-pointer"
+                title="Return to Floors & Tables"
+              >
+                <FiArrowLeft size={13} /> Floors & Tables
+              </button>
+
               <Link
                 href="/user-dashboard/menu-management"
                 className="text-xs font-bold text-gray-700 hover:text-[#e02424] transition flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 shadow-2xs"
@@ -579,9 +610,9 @@ function MenusContent() {
               </button>
             )}
             <button
-              onClick={() => router.push('/user-dashboard/tables')}
+              onClick={() => navigateToTables()}
               className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-700 group cursor-pointer"
-              title="Back to Tables"
+              title="Back to Floors & Tables"
             >
               <FiX size={20} className="group-hover:rotate-90 transition-transform" />
             </button>
@@ -591,15 +622,24 @@ function MenusContent() {
         {/* Order Items List */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-200">
           {cart.items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-              <div className="bg-slate-50 p-6 rounded-full mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+            <div className="flex flex-col items-center justify-center h-72 text-slate-400 p-6 text-center">
+              <div className="bg-slate-50 p-6 rounded-full mb-3 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
                   <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
                 </svg>
               </div>
-              <p className="font-bold tracking-tight text-slate-600">Your cart is empty</p>
-              <p className="text-xs text-slate-400 mt-0.5">Click any menu item to add</p>
+              <p className="font-bold tracking-tight text-slate-800 text-sm">Table {tableDisplayNum} is Ready</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-[240px]">
+                Click dishes to place an order, or return to Floor & Tables to seat other customers.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigateToTables()}
+                className="mt-4 px-4 py-2.5 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95"
+              >
+                <FiArrowLeft size={13} /> Return to Floors & Tables
+              </button>
             </div>
           ) : (
             cart.items.map((item, index) => {
@@ -1018,11 +1058,11 @@ function MenusContent() {
                   onClick={() => {
                     setPaymentSuccess(false)
                     setRedirectCountdown(null)
-                    router.push('/user-dashboard/tables')
+                    navigateToTables(`Payment recorded for Table ${tableDisplayNum}. Table is now free and available.`)
                   }}
                   className="w-full bg-[#e02424] hover:bg-red-700 text-white py-3.5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-red-500/20 active:scale-95 cursor-pointer"
                 >
-                  Return to Tables Now ➔
+                  Return to Floors & Tables Now ➔
                 </button>
               </div>
             </motion.div>
@@ -1049,7 +1089,7 @@ function MenusContent() {
                       setShowBillModal(false)
                       // If this was after payment, return to tables
                       if (paidOrderData) {
-                        router.push('/user-dashboard/tables')
+                        navigateToTables(`Payment recorded for Table ${tableDisplayNum}. Table is now free and available.`)
                       }
                     }}
                     className="p-1 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
@@ -1122,10 +1162,13 @@ function MenusContent() {
                   {paidOrderData && (
                     <button
                       type="button"
-                      onClick={() => router.push('/user-dashboard/tables')}
+                      onClick={() => {
+                        setShowBillModal(false)
+                        navigateToTables(`Payment recorded for Table ${tableDisplayNum}. Table is now free and available.`)
+                      }}
                       className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center cursor-pointer"
                     >
-                      Return to Tables Grid ➔
+                      Return to Floors & Tables ➔
                     </button>
                   )}
                 </div>

@@ -339,8 +339,8 @@ export default function FinanceAnalyticsPage() {
       const tableRoom = o.tableId?.tableNumber
         ? `Table ${o.tableId.tableNumber}`
         : o.roomNumber
-        ? `Room ${o.roomNumber}`
-        : 'Direct / Walk-in'
+          ? `Room ${o.roomNumber}`
+          : 'Direct / Walk-in'
 
       const itemsCount = o.items?.reduce((s, it) => s + (it.quantity || 1), 0) || 0
       const itemsList = o.items?.map((it) => `${it.quantity || 1}x ${it.name}`).join('; ') || 'N/A'
@@ -503,11 +503,10 @@ export default function FinanceAnalyticsPage() {
             <button
               key={tab.id}
               onClick={() => setDateFilter(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold tracking-tight transition shrink-0 cursor-pointer ${
-                dateFilter === tab.id
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold tracking-tight transition shrink-0 cursor-pointer ${dateFilter === tab.id
                   ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
-              }`}
+                }`}
             >
               {tab.label}
             </button>
@@ -932,13 +931,12 @@ export default function FinanceAnalyticsPage() {
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            isCompleted
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${isCompleted
                               ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                               : isCancelled
-                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                              : 'bg-amber-100 text-amber-800 border border-amber-200'
-                          }`}
+                                ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                : 'bg-amber-100 text-amber-800 border border-amber-200'
+                            }`}
                         >
                           {order.status}
                         </span>
@@ -997,11 +995,10 @@ export default function FinanceAnalyticsPage() {
                     <button
                       key={idx}
                       onClick={() => setCurrentPage(p)}
-                      className={`min-w-8 h-8 px-2.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        validCurrentPage === p
+                      className={`min-w-8 h-8 px-2.5 rounded-lg text-xs font-bold transition cursor-pointer ${validCurrentPage === p
                           ? 'bg-red-600 text-white shadow-xs'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
+                        }`}
                     >
                       {p}
                     </button>

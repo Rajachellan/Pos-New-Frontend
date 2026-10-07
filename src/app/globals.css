@@ -1,48 +1,67 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-playfair: 'Playfair Display', serif;
+  --font-serif: 'Merriweather', Georgia, serif;
+  --font-merriweather: 'Merriweather', Georgia, serif;
 }
-:root{
-    --primary-color: #e02424;
-    --primary-light: #fde8e8;
-    --primary-dark: #9b1c1c;
-    --primary-hover: #c81e1e;
-    --primary-bg: #fdf2f2;
+
+:root {
+  --primary-color: #e02424;
+  --primary-light: #fde8e8;
+  --primary-dark: #9b1c1c;
+  --primary-hover: #c81e1e;
+  --primary-bg: #fdf2f2;
+}
+
+html,
+body {
+  font-family: 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: 'Merriweather', Georgia, serif;
+  letter-spacing: -0.015em;
 }
 
 
 
 /* Navbar Css Starts */
 
-.admin-login{
-    border: solid 1px var(--primary-color);
-    padding: 8px 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 12px;
-    font-size: 13px;
-    letter-spacing: 1px;
-    background: linear-gradient(
-     90deg,
-    #9b1c1c,
-    #e02424,
-    #c81e1e,
-    #e02424,
-    #9b1c1c
-  );
+.admin-login {
+  border: solid 1px var(--primary-color);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-size: 13px;
+  letter-spacing: 1px;
+  background: linear-gradient(90deg,
+      #9b1c1c,
+      #e02424,
+      #c81e1e,
+      #e02424,
+      #9b1c1c);
   background-size: 200% auto;
-    color: white;
-    font-weight: bold;
-    transition: all 0.3s ease;
+  color: white;
+  font-weight: bold;
+  transition: all 0.3s ease;
 }
-.admin-login:hover{
- background-position: right center;
+
+.admin-login:hover {
+  background-position: right center;
   border-color: #c81e1e;
   box-shadow: 0 5px 15px rgba(224, 36, 36, 0.25);
 }
+
 /* Navbar Css Ends */
 /* Hero Section Css Starts */
 .status-badge {
@@ -94,6 +113,7 @@
     opacity: 0;
   }
 }
+
 .feature-card {
   display: flex;
   align-items: center;
@@ -137,8 +157,9 @@
   color: #6b7280;
   font-size: 12px;
 }
+
 /* Hero Section Css Ends */
-.view-branch-btn{
+.view-branch-btn {
   border: solid 1px transparent;
   background-color: var(--primary-color);
   display: flex;
@@ -148,9 +169,10 @@
   border-radius: 12px;
   color: white;
   letter-spacing: 1px;
-   font-size: 14px;
+  font-size: 14px;
 }
-.logoout-btn{
+
+.logoout-btn {
   color: white;
   display: flex;
   align-items: center;
@@ -162,4 +184,28 @@
   letter-spacing: 2px;
   font-size: 14px;
   font-weight: bold;
+}
+
+/* ========================================================================= */
+/* CONTINUOUS LOGO MARQUEE ANIMATION                                         */
+/* ========================================================================= */
+@keyframes marqueeScroll {
+  0% {
+    transform: translateX(0%);
+  }
+
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marqueeScroll 28s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
 }

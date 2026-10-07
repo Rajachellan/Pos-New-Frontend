@@ -66,6 +66,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (savedUserData) {
         try {
           setUser(JSON.parse(savedUserData));
+          // Provide instant render from cache while verifying with server
+          setLoading(false);
         } catch (e) {
           console.error("Failed to parse cached user data", e);
         }
@@ -113,8 +115,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         })
         .catch((err) => {
-          // If token expired, clear
-          if (err.response?.status === 401) {
+          // Only force logout if the server confirmed invalid/expired token
+          if (err.response?.status === 401 && err.response?.data?.code === 'UNAUTHORIZED') {
             logout();
           }
         })
@@ -238,20 +240,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const hasPermission = (permission: string) => {
     if (!user) return false;
     if (user.systemRole === "SUPER_ADMIN") return true;
-    if (user.organizationRole === "OWNER") return true;
+    if (user.organizationRole === "OWNER" || user.organizationRole === "ADMIN" || user.isAdmin) return true;
+    if ((user.permissions || []).includes("*")) return true;
+
+    // Manager role has built-in operational permissions
+    if (user.organizationRole === "MANAGER" || user.isManager) {
+      const managerAllowedPrefixes = [
+        "table.", "food_menu.", "restaurant.", "cart.", "branch.view",
+        "reservation.", "room.", "guest.", "checkin.", "checkout.",
+        "housekeeping.", "dashboard.", "payment.view", "payment.create", "report.view",
+        "user.view",
+      ];
+      if (managerAllowedPrefixes.some((pref) => permission.startsWith(pref) || permission === pref)) {
+        return true;
+      }
+    }
+
     return (user.permissions || []).includes(permission);
   };
 
   const hasAnyPermission = (perms: string[]) => {
     if (!user) return false;
-    if (user.systemRole === "SUPER_ADMIN" || user.organizationRole === "OWNER") return true;
-    return perms.some((p) => (user.permissions || []).includes(p));
+    if (user.systemRole === "SUPER_ADMIN" || user.organizationRole === "OWNER" || user.organizationRole === "ADMIN" || user.isAdmin) return true;
+    return perms.some((p) => hasPermission(p));
   };
 
   const hasAllPermissions = (perms: string[]) => {
     if (!user) return false;
-    if (user.systemRole === "SUPER_ADMIN" || user.organizationRole === "OWNER") return true;
-    return perms.every((p) => (user.permissions || []).includes(p));
+    if (user.systemRole === "SUPER_ADMIN" || user.organizationRole === "OWNER" || user.organizationRole === "ADMIN" || user.isAdmin) return true;
+    return perms.every((p) => hasPermission(p));
   };
 
   return (

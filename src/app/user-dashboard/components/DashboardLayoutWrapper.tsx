@@ -20,6 +20,8 @@ export default function DashboardLayoutWrapper({
     pathname?.endsWith("/tv") ||
     pathname?.endsWith("/customer-tv");
 
+  const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
+
   useEffect(() => {
     if (!loading) {
       if (!user) {
@@ -48,11 +50,11 @@ export default function DashboardLayoutWrapper({
   }
 
   return (
-    <section className="flex min-h-screen">
-      <Sidebar />
-      <div className="w-full h-full">
-        <Navbar />
-        <div>{children}</div>
+    <section className="flex min-h-screen bg-slate-50/60 relative">
+      <Sidebar mobileOpen={mobileSidebarOpen} setMobileOpen={setMobileSidebarOpen} />
+      <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
+        <Navbar onToggleMobileMenu={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
+        <main className="flex-1">{children}</main>
       </div>
     </section>
   );

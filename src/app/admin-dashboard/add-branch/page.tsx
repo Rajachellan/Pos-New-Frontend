@@ -287,11 +287,10 @@ function BranchesPage() {
       <div className="flex items-center gap-3 border-b border-slate-200/80 pb-2">
         <button
           onClick={() => setActiveTab('branches')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'branches'
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${activeTab === 'branches'
               ? 'bg-red-600 text-white shadow-md shadow-red-900/20'
               : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-          }`}
+            }`}
         >
           <FaCodeBranch size={14} />
           <span>Branches & Outlets ({branches.length})</span>
@@ -302,11 +301,10 @@ function BranchesPage() {
             setActiveTab('organization')
             if (!orgData) fetchOrgProfile()
           }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'organization'
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition cursor-pointer ${activeTab === 'organization'
               ? 'bg-red-600 text-white shadow-md shadow-red-900/20'
               : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80'
-          }`}
+            }`}
         >
           <RiBuildingLine size={16} />
           <span>Organization & Brand Profile</span>
@@ -319,11 +317,10 @@ function BranchesPage() {
       {/* Alert Notification Toast */}
       {notification && (
         <div
-          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold shadow-xs ${
-            notification.type === 'success'
+          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold shadow-xs ${notification.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : 'bg-red-50 text-red-800 border-red-200'
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2.5">
             {notification.type === 'success' ? (
@@ -347,9 +344,8 @@ function BranchesPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Creation / Edit Form - Sticky column */}
           <div className="lg:col-span-5 lg:sticky lg:top-6 lg:self-start">
-            <div className={`rounded-3xl border bg-white p-6 lg:p-8 shadow-xs space-y-6 ${
-              editingBranch ? 'border-red-500 ring-2 ring-red-100' : 'border-slate-200/80'
-            }`}>
+            <div className={`rounded-3xl border bg-white p-6 lg:p-8 shadow-xs space-y-6 ${editingBranch ? 'border-red-500 ring-2 ring-red-100' : 'border-slate-200/80'
+              }`}>
               <div className="border-b border-slate-100 pb-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -446,8 +442,8 @@ function BranchesPage() {
                         ? "Saving Changes..."
                         : "Registering Branch..."
                       : editingBranch
-                      ? "Update Branch Details"
-                      : "Register Branch"}
+                        ? "Update Branch Details"
+                        : "Register Branch"}
                   </button>
                   {editingBranch && (
                     <button
@@ -501,11 +497,10 @@ function BranchesPage() {
                 {filteredBranches.map((branch) => (
                   <div
                     key={branch._id}
-                    className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${
-                      editingBranch?._id === branch._id
+                    className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${editingBranch?._id === branch._id
                         ? "border-red-500 ring-2 ring-red-200 bg-red-50/20"
                         : "border-slate-200/80 hover:border-red-200"
-                    }`}
+                      }`}
                   >
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-2">
@@ -523,11 +518,10 @@ function BranchesPage() {
                           </div>
                         </div>
                         <span
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border shrink-0 ${
-                            branch.isActive !== false
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border shrink-0 ${branch.isActive !== false
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
                               : 'bg-slate-100 text-slate-500 border-slate-200'
-                          }`}
+                            }`}
                         >
                           {branch.isActive !== false ? 'Active' : 'Inactive'}
                         </span>

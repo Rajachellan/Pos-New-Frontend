@@ -27,6 +27,13 @@ api.interceptors.request.use((config) => {
                 }
             } catch (e) {}
         }
+
+        const selectedBranch = localStorage.getItem("pos_selected_branch");
+        if (selectedBranch === 'b1') {
+            localStorage.removeItem("pos_selected_branch");
+        } else if (selectedBranch && selectedBranch !== 'ALL' && !config.headers['x-branch-id']) {
+            config.headers['x-branch-id'] = selectedBranch;
+        }
     }
 
     return config;

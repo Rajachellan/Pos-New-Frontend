@@ -205,11 +205,10 @@ function AddTablesPage() {
       {/* Notification Toast */}
       {notification && (
         <div
-          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold ${
-            notification.type === 'success'
+          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold ${notification.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : 'bg-red-50 text-red-800 border-red-200'
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2.5">
             {notification.type === 'success' ? (
@@ -315,22 +314,20 @@ function AddTablesPage() {
                     <button
                       type="button"
                       onClick={() => setTableAvailability("AVAILABLE")}
-                      className={`rounded-xl py-2.5 text-xs font-bold transition border cursor-pointer ${
-                        tableAvailability === "AVAILABLE"
+                      className={`rounded-xl py-2.5 text-xs font-bold transition border cursor-pointer ${tableAvailability === "AVAILABLE"
                           ? "bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-100"
                           : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
-                      }`}
+                        }`}
                     >
                       Available
                     </button>
                     <button
                       type="button"
                       onClick={() => setTableAvailability("OCCUPIED")}
-                      className={`rounded-xl py-2.5 text-xs font-bold transition border cursor-pointer ${
-                        tableAvailability === "OCCUPIED"
+                      className={`rounded-xl py-2.5 text-xs font-bold transition border cursor-pointer ${tableAvailability === "OCCUPIED"
                           ? "bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-100"
                           : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
-                      }`}
+                        }`}
                     >
                       Occupied
                     </button>
@@ -349,8 +346,8 @@ function AddTablesPage() {
                       ? "Updating Table..."
                       : "Adding Table..."
                     : editingTable
-                    ? "Update Table"
-                    : "Create Table"}
+                      ? "Update Table"
+                      : "Create Table"}
                 </button>
                 {editingTable && (
                   <button
@@ -372,11 +369,10 @@ function AddTablesPage() {
                 Live Table Preview
               </span>
               <span
-                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${
-                  tableAvailability === "AVAILABLE"
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${tableAvailability === "AVAILABLE"
                     ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-300"
                     : "bg-amber-500/20 border-amber-400/40 text-amber-300"
-                }`}
+                  }`}
               >
                 {tableAvailability}
               </span>
@@ -426,11 +422,10 @@ function AddTablesPage() {
               </span>
               <button
                 onClick={() => setSelectedFilterArea("ALL")}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                  selectedFilterArea === "ALL"
+                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${selectedFilterArea === "ALL"
                     ? "bg-slate-900 text-white shadow-xs"
                     : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-                }`}
+                  }`}
               >
                 All Sections ({tableData.length})
               </button>
@@ -440,11 +435,10 @@ function AddTablesPage() {
                   <button
                     key={area._id}
                     onClick={() => setSelectedFilterArea(area._id)}
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                      selectedFilterArea === area._id
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap cursor-pointer ${selectedFilterArea === area._id
                         ? "bg-blue-600 text-white shadow-xs"
                         : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-                    }`}
+                      }`}
                   >
                     {area.areaName} ({count})
                   </button>
@@ -464,11 +458,10 @@ function AddTablesPage() {
               {filteredTables.map((table) => (
                 <div
                   key={table._id}
-                  className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${
-                    editingTable?._id === table._id
+                  className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${editingTable?._id === table._id
                       ? "border-blue-500 ring-2 ring-blue-200"
                       : "border-slate-200/80 hover:border-blue-300"
-                  }`}
+                    }`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -476,11 +469,10 @@ function AddTablesPage() {
                         <PiTableBold size={20} />
                       </div>
                       <span
-                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${
-                          table.availabilityStatus === "AVAILABLE"
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${table.availabilityStatus === "AVAILABLE"
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : "bg-amber-50 text-amber-700 border-amber-200"
-                        }`}
+                          }`}
                       >
                         {table.availabilityStatus}
                       </span>

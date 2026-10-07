@@ -46,6 +46,7 @@ export default function MenuManagementPage() {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [itemName, setItemName] = useState("");
   const [itemCategory, setItemCategory] = useState("");
+  const [isNewCategoryMode, setIsNewCategoryMode] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [itemPrice, setItemPrice] = useState<number | string>("");
   const [itemDescription, setItemDescription] = useState("");
@@ -112,7 +113,12 @@ export default function MenuManagementPage() {
   // Open Add Modal
   const openAddModal = (presetCategory?: string) => {
     setItemName("");
-    setItemCategory(presetCategory || (categories[0] ?? "BIRIYANI"));
+    const defaultCat =
+      presetCategory && presetCategory !== "ALL"
+        ? presetCategory.toUpperCase().trim()
+        : categories[0] ?? "BIRIYANI";
+    setItemCategory(defaultCat);
+    setIsNewCategoryMode(false);
     setItemPrice("");
     setItemDescription("");
     setItemAvailable(true);
@@ -124,7 +130,8 @@ export default function MenuManagementPage() {
   const openEditModal = (item: MenuItem) => {
     setEditingItem(item);
     setItemName(item.name);
-    setItemCategory(item.category);
+    setItemCategory(item.category.toUpperCase().trim());
+    setIsNewCategoryMode(false);
     setItemPrice(item.price);
     setItemDescription(item.description || "");
     setItemAvailable(item.isAvailable);
@@ -558,19 +565,80 @@ export default function MenuManagementPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                      Category
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. BIRIYANI"
-                      value={itemCategory}
-                      onChange={(e) => setItemCategory(e.target.value.toUpperCase())}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
-                    />
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Category
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsNewCategoryMode(!isNewCategoryMode);
+                          if (!isNewCategoryMode) {
+                            setItemCategory("");
+                          } else {
+                            setItemCategory(categories[0] || "BIRIYANI");
+                          }
+                        }}
+                        className="text-[11px] font-bold text-[#e02424] hover:underline cursor-pointer"
+                      >
+                        {isNewCategoryMode ? "← Choose Existing" : "+ New Category"}
+                      </button>
+                    </div>
+
+                    {isNewCategoryMode ? (
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        placeholder="Type new category..."
+                        value={itemCategory}
+                        onChange={(e) => setItemCategory(e.target.value.toUpperCase())}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
+                      />
+                    ) : (
+                      <select
+                        required
+                        value={itemCategory}
+                        onChange={(e) => {
+                          if (e.target.value === "__NEW__") {
+                            setIsNewCategoryMode(true);
+                            setItemCategory("");
+                          } else {
+                            setItemCategory(e.target.value);
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424] cursor-pointer"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                        <option value="__NEW__">+ Add New Category...</option>
+                      </select>
+                    )}
+
+                    {/* Quick Category Chips */}
+                    {!isNewCategoryMode && categories.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {categories.slice(0, 6).map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setItemCategory(cat)}
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                              itemCategory === cat
+                                ? "bg-[#e02424] text-white"
+                                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -683,18 +751,80 @@ export default function MenuManagementPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                      Category
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={itemCategory}
-                      onChange={(e) => setItemCategory(e.target.value.toUpperCase())}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
-                    />
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Category
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsNewCategoryMode(!isNewCategoryMode);
+                          if (!isNewCategoryMode) {
+                            setItemCategory("");
+                          } else {
+                            setItemCategory(editingItem?.category || categories[0] || "BIRIYANI");
+                          }
+                        }}
+                        className="text-[11px] font-bold text-[#e02424] hover:underline cursor-pointer"
+                      >
+                        {isNewCategoryMode ? "← Choose Existing" : "+ New Category"}
+                      </button>
+                    </div>
+
+                    {isNewCategoryMode ? (
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        placeholder="Type new category..."
+                        value={itemCategory}
+                        onChange={(e) => setItemCategory(e.target.value.toUpperCase())}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
+                      />
+                    ) : (
+                      <select
+                        required
+                        value={itemCategory}
+                        onChange={(e) => {
+                          if (e.target.value === "__NEW__") {
+                            setIsNewCategoryMode(true);
+                            setItemCategory("");
+                          } else {
+                            setItemCategory(e.target.value);
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424] cursor-pointer"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                        <option value="__NEW__">+ Add New Category...</option>
+                      </select>
+                    )}
+
+                    {/* Quick Category Chips */}
+                    {!isNewCategoryMode && categories.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {categories.slice(0, 6).map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setItemCategory(cat)}
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                              itemCategory === cat
+                                ? "bg-[#e02424] text-white"
+                                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>

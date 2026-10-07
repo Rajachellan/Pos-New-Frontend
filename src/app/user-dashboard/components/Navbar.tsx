@@ -38,7 +38,11 @@ interface UserData {
   canViewFinances?: boolean;
 }
 
-export default function Navbar() {
+interface NavbarProps {
+  onToggleMobileMenu?: () => void;
+}
+
+export default function Navbar({ onToggleMobileMenu }: NavbarProps) {
   const { user: authUser, isAdmin: checkIsAdmin, isManager: checkIsManager, organizationName } = useAuth();
   const [branches, setBranches] = useState<BranchData[]>([]);
   const [activeBranch, setActiveBranch] = useState<BranchData | null>(null);
@@ -100,28 +104,42 @@ export default function Navbar() {
   async function fetchBranches(currentUser?: UserData | null) {
     try {
       const userObj = currentUser || userData;
-      const adminCheck =
+      const adminOrManagerCheck =
         userObj?.isAdmin ||
+        userObj?.isManager ||
         userObj?.systemRole === "SUPER_ADMIN" ||
         userObj?.organizationRole === "OWNER" ||
         userObj?.organizationRole === "ADMIN" ||
+        userObj?.organizationRole === "MANAGER" ||
         userObj?.role === "Admin" ||
-        userObj?.role?.name === "Admin";
+        userObj?.role === "Manager" ||
+        userObj?.role?.name === "Admin" ||
+        userObj?.role?.name === "Manager";
 
       const res = await api.get("/get/branch/role");
       const list: BranchData[] = res.data.data || [];
       setBranches(list);
 
-      const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      let savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      if (savedBranchId === "b1") {
+        localStorage.removeItem("pos_selected_branch");
+        savedBranchId = null;
+      }
 
-      if (!adminCheck && list.length > 0) {
-        // Non-admin staff is strictly locked to their single assigned branch
-        const assigned = list[0];
+      if (savedBranchId && savedBranchId !== "ALL" && !list.some((b: BranchData) => b._id === savedBranchId)) {
+        savedBranchId = null;
+        localStorage.removeItem("pos_selected_branch");
+      }
+
+      if (!adminOrManagerCheck && list.length > 0 && userObj?.branch) {
+        // Non-admin/non-manager staff strictly locked to their assigned branch
+        const assignedId = userObj.branch?._id || userObj.branch;
+        const assigned = list.find((b: BranchData) => b._id === assignedId) || list[0];
         setActiveBranch(assigned);
         localStorage.setItem("pos_selected_branch", assigned._id);
         window.dispatchEvent(new CustomEvent("pos_branch_changed", { detail: assigned }));
       } else {
-        // Admin user can pick "ALL" or any individual branch
+        // Admin or Manager can pick "ALL" or any individual branch
         let chosen: BranchData | null = null;
         if (savedBranchId === "ALL") {
           chosen = { _id: "ALL", branchName: "All Outlets (Consolidated)", branchCode: "ALL" };
@@ -140,19 +158,10 @@ export default function Navbar() {
         }
       }
     } catch (err) {
-      // Fallback display
-      setBranches([
-        {
-          _id: "b1",
-          branchName: "Tanjavoor Hotel",
-          branchCode: "TNJ-01",
-        },
-      ]);
-      setActiveBranch({
-        _id: "b1",
-        branchName: "Tanjavoor Hotel",
-        branchCode: "TNJ-01",
-      });
+      console.error("Error fetching branches:", err);
+      if (typeof window !== "undefined" && localStorage.getItem("pos_selected_branch") === "b1") {
+        localStorage.removeItem("pos_selected_branch");
+      }
     }
   }
 
@@ -185,17 +194,20 @@ export default function Navbar() {
   const displayRole = isAdmin ? "Admin" : isManager ? "Manager" : "Staff";
 
   return (
-    <header className="w-full bg-white border-b border-gray-200/80 px-6 py-3 flex items-center justify-between shadow-2xs z-30 select-none">
+    <header className="sticky top-0 w-full bg-white/95 backdrop-blur-md border-b border-gray-200/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-2xs z-30 select-none">
       {/* Left: Hamburger + Active Outlet */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
         <button
-          className="text-gray-600 hover:text-gray-900 p-1.5 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+          type="button"
+          onClick={onToggleMobileMenu}
+          className="text-gray-700 hover:text-gray-900 p-2 rounded-xl hover:bg-gray-100 active:scale-95 transition cursor-pointer"
           title="Toggle Navigation"
+          aria-label="Toggle Navigation"
         >
           <FiMenu size={20} />
         </button>
 
-        <div className="relative">
+        <div className="relative min-w-0">
           <div
             onClick={() => {
               if (canSwitchBranches && branches.length > 0) {
@@ -317,16 +329,17 @@ export default function Navbar() {
       </div>
 
       {/* Right: Admin Console Switch + Search + Bell + Date/Time + Avatar */}
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
         {/* Admin Console Switcher - Visible only to Admin users */}
         {isAdmin && (
           <Link
             href="/admin-dashboard"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold transition shadow-xs border border-slate-700 active:scale-95"
+            className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-[11px] sm:text-xs font-bold transition shadow-xs border border-slate-700 active:scale-95 shrink-0"
             title="Open Admin Management Console"
           >
-            <RiShieldCheckLine className="text-red-400" size={15} />
-            <span>Admin Console</span>
+            <RiShieldCheckLine className="text-red-400" size={14} />
+            <span className="hidden sm:inline">Admin Console</span>
+            <span className="sm:hidden">Admin</span>
           </Link>
         )}
 

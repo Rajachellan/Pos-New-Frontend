@@ -121,11 +121,10 @@ function AddMenusPage() {
       {/* Notification Toast */}
       {notification && (
         <div
-          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold ${
-            notification.type === 'success'
+          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold ${notification.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : 'bg-red-50 text-red-800 border-red-200'
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2.5">
             {notification.type === 'success' ? (
@@ -279,11 +278,10 @@ function AddMenusPage() {
               </span>
               <button
                 onClick={() => setSelectedCategoryFilter('ALL')}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${
-                  selectedCategoryFilter === 'ALL'
+                className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${selectedCategoryFilter === 'ALL'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                }`}
+                  }`}
               >
                 All ({menuDatas.length})
               </button>
@@ -294,11 +292,10 @@ function AddMenusPage() {
                   <button
                     key={cat}
                     onClick={() => setSelectedCategoryFilter(cat)}
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${
-                      selectedCategoryFilter === cat
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${selectedCategoryFilter === cat
                         ? 'bg-purple-600 text-white shadow-xs'
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                    }`}
+                      }`}
                   >
                     {cat} ({count})
                   </button>

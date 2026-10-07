@@ -110,14 +110,18 @@ export default function OnboardOrganizationPage() {
     <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-extrabold text-white">Customer Onboarding Wizard</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <span className="text-[11px] font-bold uppercase tracking-widest text-red-700 bg-red-50 px-3 py-1 rounded-full border border-red-200/70 inline-flex items-center gap-1.5 mb-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#e02424]"></span>
+          Tenant Provisioning
+        </span>
+        <h1 className="text-3xl font-black text-slate-900 tracking-tight">Customer Onboarding Wizard</h1>
+        <p className="text-sm text-slate-500 mt-1">
           Complete the 5-step workflow to provision a hotel organization, license, owner account, and initial branch.
         </p>
       </div>
 
       {/* Stepper Progress Bar */}
-      <div className="grid grid-cols-5 gap-2 border-b border-slate-800 pb-6">
+      <div className="grid grid-cols-5 gap-2 border-b border-slate-200/80 pb-6">
         {stepsList.map((s) => {
           const Icon = s.icon;
           const isActive = step === s.num;
@@ -127,24 +131,24 @@ export default function OnboardOrganizationPage() {
               key={s.num}
               className={`flex flex-col items-center gap-2 text-center transition ${
                 isActive
-                  ? "text-amber-400 font-bold"
+                  ? "text-[#e02424] font-bold"
                   : isDone
-                  ? "text-emerald-400 font-semibold"
-                  : "text-slate-500"
+                  ? "text-emerald-700 font-semibold"
+                  : "text-slate-400"
               }`}
             >
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center border text-sm font-bold transition ${
                   isActive
-                    ? "bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-orange-950/40"
+                    ? "bg-gradient-to-tr from-[#9b1c1c] via-[#e02424] to-[#f05252] text-white border-transparent shadow-md shadow-red-500/25"
                     : isDone
-                    ? "bg-emerald-950 text-emerald-400 border-emerald-700"
-                    : "bg-slate-900 border-slate-800"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-slate-100 border-slate-200 text-slate-400"
                 }`}
               >
                 <Icon size={18} />
               </div>
-              <span className="text-[11px] uppercase tracking-wider">{s.title}</span>
+              <span className="text-[11px] uppercase tracking-wider font-semibold">{s.title}</span>
             </div>
           );
         })}
@@ -152,46 +156,46 @@ export default function OnboardOrganizationPage() {
 
       {/* Error Message */}
       {errorMsg && (
-        <div className="p-4 bg-rose-950/80 border border-rose-800 text-rose-300 rounded-xl text-xs font-semibold">
+        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-semibold">
           {errorMsg}
         </div>
       )}
 
       {/* Success Screen */}
       {successData ? (
-        <div className="bg-slate-900 border border-emerald-800/60 rounded-2xl p-8 text-center space-y-6">
-          <div className="w-16 h-16 bg-emerald-900/60 border border-emerald-500 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto text-3xl">
+        <div className="bg-white border border-emerald-200 rounded-2xl p-8 text-center space-y-6 shadow-sm">
+          <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto text-3xl shadow-xs">
             <RiCheckDoubleLine />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-white">Customer Onboarded Successfully!</h2>
-            <p className="text-slate-400 text-sm mt-1">
-              Organization <span className="text-amber-400 font-semibold">{successData.organization?.name}</span> is live.
+            <h2 className="text-2xl font-bold text-slate-900">Customer Onboarded Successfully!</h2>
+            <p className="text-slate-500 text-sm mt-1">
+              Organization <span className="text-[#e02424] font-bold">{successData.organization?.name}</span> is live.
             </p>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 max-w-lg mx-auto text-left text-xs space-y-2">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 max-w-lg mx-auto text-left text-xs space-y-2.5">
             <div className="flex justify-between">
-              <span className="text-slate-400">Owner / Admin:</span>
-              <span className="text-slate-200 font-semibold">{successData.owner?.name}</span>
+              <span className="text-slate-500 font-medium">Owner / Admin:</span>
+              <span className="text-slate-800 font-bold">{successData.owner?.name}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Admin Login Email:</span>
-              <span className="text-amber-400 font-mono font-semibold">{successData.owner?.email}</span>
+              <span className="text-slate-500 font-medium">Admin Login Email:</span>
+              <span className="text-[#e02424] font-mono font-semibold">{successData.owner?.email}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Role:</span>
-              <span className="text-emerald-400 font-bold uppercase">{successData.owner?.organizationRole}</span>
+              <span className="text-slate-500 font-medium">Role:</span>
+              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold uppercase">{successData.owner?.organizationRole}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Initial Branch:</span>
-              <span className="text-slate-200">{successData.branch?.branchName} ({successData.branch?.branchCode})</span>
+              <span className="text-slate-500 font-medium">Initial Branch:</span>
+              <span className="text-slate-800 font-medium">{successData.branch?.branchName} ({successData.branch?.branchCode})</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">License:</span>
-              <span className="text-amber-400 font-bold">{successData.organization?.license?.type}</span>
+              <span className="text-slate-500 font-medium">License:</span>
+              <span className="text-slate-800 font-bold bg-slate-200 px-2 py-0.5 rounded">{successData.organization?.license?.type}</span>
             </div>
-            <div className="flex justify-between pt-2 border-t border-slate-800 text-emerald-400 font-medium">
+            <div className="flex justify-between pt-2.5 border-t border-slate-200 text-emerald-700 font-semibold">
               <span>Onboarding Details Email:</span>
               <span>{successData.emailDispatched ? "Sent successfully ✓" : "Dispatched to " + successData.owner?.email}</span>
             </div>
@@ -200,7 +204,7 @@ export default function OnboardOrganizationPage() {
           <div className="flex items-center justify-center gap-4 pt-4">
             <button
               onClick={() => router.push("/super-admin/organizations")}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-sm transition"
+              className="bg-gradient-to-tr from-[#9b1c1c] via-[#e02424] to-[#f05252] text-white font-bold px-6 py-2.5 rounded-xl text-sm shadow-md shadow-red-500/25 hover:shadow-lg transition cursor-pointer"
             >
               View Organizations List
             </button>
@@ -226,7 +230,7 @@ export default function OnboardOrganizationPage() {
                   branchAddress: "",
                 });
               }}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-6 py-2.5 rounded-xl text-sm transition"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-6 py-2.5 rounded-xl text-sm transition cursor-pointer border border-slate-200"
             >
               Onboard Another
             </button>
@@ -234,41 +238,43 @@ export default function OnboardOrganizationPage() {
         </div>
       ) : (
         /* Form Card */
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-xl">
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-7 shadow-xs">
           {/* STEP 1: Organization Details */}
           {step === 1 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <RiBuilding4Line className="text-amber-400" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <span className="p-1 rounded bg-red-50 text-[#e02424]">
+                  <RiBuilding4Line size={18} />
+                </span>
                 <span>Step 1: Hotel Organization Information</span>
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Hotel / Organization Name *</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Hotel / Organization Name *</label>
                   <input
                     type="text"
                     required
                     value={formData.name}
                     onChange={(e) => updateField("name", e.target.value)}
                     placeholder="e.g. Grand Palace Hotel"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Legal Entity / Registered Name</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Legal Entity / Registered Name</label>
                   <input
                     type="text"
                     value={formData.legalName}
                     onChange={(e) => updateField("legalName", e.target.value)}
                     placeholder="e.g. Grand Palace Hospitality Pvt Ltd"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
+                  <label className="block text-slate-700 font-semibold mb-1">
                     Hotel & Admin Login Email Address *
                   </label>
                   <input
@@ -277,43 +283,43 @@ export default function OnboardOrganizationPage() {
                     value={formData.email}
                     onChange={(e) => updateField("email", e.target.value)}
                     placeholder="e.g. admin@hotelname.com"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
-                  <span className="text-[10px] text-amber-400/90 mt-1 block">
+                  <span className="text-[10px] text-red-600 mt-1 block font-medium">
                     ✓ This email will be used for Owner Admin login & receiving login credentials.
                   </span>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Phone Number</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Phone Number</label>
                   <input
                     type="tel"
                     value={formData.phno}
                     onChange={(e) => updateField("phno", e.target.value)}
                     placeholder="+91 9876543210"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">GST / Tax Identification Number</label>
+                  <label className="block text-slate-700 font-semibold mb-1">GST / Tax Identification Number</label>
                   <input
                     type="text"
                     value={formData.gstNumber}
                     onChange={(e) => updateField("gstNumber", e.target.value.toUpperCase())}
                     placeholder="e.g. 33AAAAA0000A1Z5"
-                    className="w-full text-sm font-mono px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs font-mono px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Primary Address</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Primary Address</label>
                   <input
                     type="text"
                     value={formData.address}
                     onChange={(e) => updateField("address", e.target.value)}
                     placeholder="City, State, Postal Code"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
               </div>
@@ -323,8 +329,10 @@ export default function OnboardOrganizationPage() {
           {/* STEP 2: Commercial License */}
           {step === 2 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <RiAwardLine className="text-amber-400" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <span className="p-1 rounded bg-red-50 text-[#e02424]">
+                  <RiAwardLine size={18} />
+                </span>
                 <span>Step 2: Commercial License Plan</span>
               </h3>
 
@@ -337,12 +345,12 @@ export default function OnboardOrganizationPage() {
                       onClick={() => updateField("licenseType", plan)}
                       className={`cursor-pointer rounded-2xl p-5 border text-center transition ${
                         isSelected
-                          ? "bg-amber-950/40 border-amber-500 shadow-md shadow-orange-950/30 text-white"
-                          : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                          ? "bg-red-50/70 border-red-500 shadow-sm text-slate-900"
+                          : "bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300"
                       }`}
                     >
-                      <div className="font-extrabold text-base mb-1">{plan}</div>
-                      <p className="text-xs text-slate-400">
+                      <div className={`font-extrabold text-base mb-1 ${isSelected ? "text-red-700" : "text-slate-800"}`}>{plan}</div>
+                      <p className="text-xs text-slate-500">
                         {plan === "LIFETIME" && "Permanent perpetual license with no expiry date."}
                         {plan === "SUBSCRIPTION" && "Recurring subscription billed periodically."}
                         {plan === "TRIAL" && "Evaluation trial license with automated expiry."}
@@ -354,14 +362,14 @@ export default function OnboardOrganizationPage() {
 
               {formData.licenseType !== "LIFETIME" && (
                 <div className="pt-3 max-w-sm">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
                     License Expiration Date
                   </label>
                   <input
                     type="date"
                     value={formData.licenseExpiresAt}
                     onChange={(e) => updateField("licenseExpiresAt", e.target.value)}
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:outline-none"
                   />
                 </div>
               )}
@@ -371,55 +379,57 @@ export default function OnboardOrganizationPage() {
           {/* STEP 3: Customer Owner Credentials */}
           {step === 3 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <RiUserFollowLine className="text-amber-400" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <span className="p-1 rounded bg-red-50 text-[#e02424]">
+                  <RiUserFollowLine size={18} />
+                </span>
                 <span>Step 3: Customer Organization Owner / Admin Credentials</span>
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 This account will be the primary Admin / Owner for this hotel organization. Login credentials and onboarding details will be sent automatically to this email.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Owner Full Name *</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Owner Full Name *</label>
                   <input
                     type="text"
                     required
                     value={formData.ownerName}
                     onChange={(e) => updateField("ownerName", e.target.value)}
                     placeholder="e.g. Rajesh Kumar"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Admin Login Email *</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Admin Login Email *</label>
                   <input
                     type="email"
                     required
                     value={formData.ownerEmail || formData.email}
                     onChange={(e) => updateField("ownerEmail", e.target.value)}
                     placeholder="admin@hotelname.com"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-amber-400 font-mono focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[#e02424] font-mono font-semibold focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
-                  <span className="text-[10px] text-slate-400 mt-1 block">
+                  <span className="text-[10px] text-slate-500 mt-1 block">
                     ✓ Synced with Step 1 email. Same email is used for both hotel contact and admin login.
                   </span>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Admin Username (Optional)</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Admin Username (Optional)</label>
                   <input
                     type="text"
                     value={formData.ownerUsername}
                     onChange={(e) => updateField("ownerUsername", e.target.value)}
                     placeholder="e.g. Aatif or rajeshkumar"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Initial Password *</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Initial Password *</label>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
@@ -427,17 +437,17 @@ export default function OnboardOrganizationPage() {
                       value={formData.ownerPassword}
                       onChange={(e) => updateField("ownerPassword", e.target.value)}
                       placeholder="Enter secure initial password"
-                      className="w-full text-sm px-3.5 py-2.5 pr-10 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                      className="w-full text-xs px-3.5 py-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:ring-2 focus:ring-red-500/10 focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition"
                     >
                       {showPassword ? <FiEyeOff size={16} /> : <FiEye size={16} />}
                     </button>
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-1 block">
+                  <span className="text-[10px] text-slate-500 mt-1 block">
                     This password will be securely emailed to the admin login email.
                   </span>
                 </div>
@@ -448,42 +458,44 @@ export default function OnboardOrganizationPage() {
           {/* STEP 4: Initial Branch Setup */}
           {step === 4 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <RiMapPinLine className="text-amber-400" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <span className="p-1 rounded bg-red-50 text-[#e02424]">
+                  <RiMapPinLine size={18} />
+                </span>
                 <span>Step 4: Primary / Initial Hotel Branch</span>
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Branch Name</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Branch Name</label>
                   <input
                     type="text"
                     value={formData.branchName}
                     onChange={(e) => updateField("branchName", e.target.value)}
                     placeholder={`${formData.name || 'Hotel'} - Main Branch`}
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Branch Code</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Branch Code</label>
                   <input
                     type="text"
                     value={formData.branchCode}
                     onChange={(e) => updateField("branchCode", e.target.value.toUpperCase())}
                     placeholder="HQ01"
-                    className="w-full text-sm font-mono px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs font-mono px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:outline-none"
                   />
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-slate-300 font-semibold mb-1">Branch Location Address</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Branch Location Address</label>
                   <input
                     type="text"
                     value={formData.branchAddress}
                     onChange={(e) => updateField("branchAddress", e.target.value)}
                     placeholder="Branch physical address"
-                    className="w-full text-sm px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:border-amber-400 focus:outline-none"
+                    className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-[#e02424] focus:outline-none"
                   />
                 </div>
               </div>
@@ -493,47 +505,49 @@ export default function OnboardOrganizationPage() {
           {/* STEP 5: Final Review & Confirmation */}
           {step === 5 && (
             <div className="space-y-5">
-              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                <RiCheckDoubleLine className="text-amber-400" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <span className="p-1 rounded bg-red-50 text-[#e02424]">
+                  <RiCheckDoubleLine size={18} />
+                </span>
                 <span>Step 5: Review & Confirm Onboarding</span>
               </h3>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3 text-xs">
-                <div className="grid grid-cols-2 gap-2 border-b border-slate-900 pb-2">
-                  <span className="text-slate-400">Hotel Name:</span>
-                  <span className="text-white font-bold">{formData.name}</span>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-2 border-b border-slate-200/80 pb-2">
+                  <span className="text-slate-500 font-medium">Hotel Name:</span>
+                  <span className="text-slate-900 font-bold">{formData.name}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 border-b border-slate-900 pb-2">
-                  <span className="text-slate-400">Admin Login Email:</span>
-                  <span className="text-amber-400 font-mono font-semibold">{formData.ownerEmail || formData.email}</span>
+                <div className="grid grid-cols-2 gap-2 border-b border-slate-200/80 pb-2">
+                  <span className="text-slate-500 font-medium">Admin Login Email:</span>
+                  <span className="text-[#e02424] font-mono font-semibold">{formData.ownerEmail || formData.email}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 border-b border-slate-900 pb-2">
-                  <span className="text-slate-400">License:</span>
-                  <span className="text-amber-400 font-bold uppercase">{formData.licenseType}</span>
+                <div className="grid grid-cols-2 gap-2 border-b border-slate-200/80 pb-2">
+                  <span className="text-slate-500 font-medium">License:</span>
+                  <span className="text-slate-800 font-bold uppercase">{formData.licenseType}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 border-b border-slate-900 pb-2">
-                  <span className="text-slate-400">Owner / Admin Name:</span>
-                  <span className="text-slate-200 font-semibold">{formData.ownerName}</span>
+                <div className="grid grid-cols-2 gap-2 border-b border-slate-200/80 pb-2">
+                  <span className="text-slate-500 font-medium">Owner / Admin Name:</span>
+                  <span className="text-slate-900 font-semibold">{formData.ownerName}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <span className="text-slate-400">Initial Branch:</span>
-                  <span className="text-slate-200">{formData.branchName || `${formData.name} - Main Branch`} ({formData.branchCode})</span>
+                  <span className="text-slate-500 font-medium">Initial Branch:</span>
+                  <span className="text-slate-800">{formData.branchName || `${formData.name} - Main Branch`} ({formData.branchCode})</span>
                 </div>
               </div>
 
-              <div className="p-3 bg-emerald-950/40 border border-emerald-800/40 rounded-xl text-xs text-emerald-300">
-                Notice: On submission, the organization, license, initial branch, and admin account will be provisioned. Login credentials & hotel access details will be immediately emailed to <strong className="text-amber-300">{formData.ownerEmail || formData.email}</strong>.
+              <div className="p-3 bg-red-50/70 border border-red-200/80 rounded-xl text-xs text-red-800">
+                Notice: On submission, the organization, license, initial branch, and admin account will be provisioned. Login credentials & hotel access details will be immediately emailed to <strong className="text-red-950 font-bold">{formData.ownerEmail || formData.email}</strong>.
               </div>
             </div>
           )}
 
           {/* Navigation Controls */}
-          <div className="flex items-center justify-between pt-6 mt-6 border-t border-slate-800">
+          <div className="flex items-center justify-between pt-6 mt-6 border-t border-slate-100">
             {step > 1 ? (
               <button
                 type="button"
                 onClick={prevStep}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
               >
                 <RiArrowLeftLine />
                 <span>Back</span>
@@ -544,7 +558,7 @@ export default function OnboardOrganizationPage() {
               <button
                 type="button"
                 onClick={nextStep}
-                className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs shadow-md shadow-orange-950/40 transition"
+                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-tr from-[#9b1c1c] via-[#e02424] to-[#f05252] text-white font-bold rounded-xl text-xs shadow-md shadow-red-500/20 hover:shadow-lg transition cursor-pointer"
               >
                 <span>Continue</span>
                 <RiArrowRightLine />
@@ -554,7 +568,7 @@ export default function OnboardOrganizationPage() {
                 type="button"
                 disabled={loading}
                 onClick={handleSubmit}
-                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-950/50 disabled:opacity-50 transition"
+                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/25 disabled:opacity-50 transition cursor-pointer"
               >
                 {loading ? "Provisioning..." : "Confirm & Provision Customer"}
               </button>

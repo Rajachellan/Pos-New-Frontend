@@ -2,49 +2,64 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { RiSearchLine, RiNotification3Line, RiShieldCheckLine, RiRestaurantLine } from 'react-icons/ri'
+import { RiSearchLine, RiNotification3Line, RiShieldCheckLine, RiRestaurantLine, RiMenuLine } from 'react-icons/ri'
 import { useAuth } from '@/src/app/context/AuthContext'
 
-function Navbar() {
+interface NavbarProps {
+  onToggleMobileMenu?: () => void
+}
+
+function Navbar({ onToggleMobileMenu }: NavbarProps) {
   const { user, organizationName } = useAuth()
 
   const displayName = user?.name || user?.username || 'User'
   const displayRole = user?.systemRole === 'SUPER_ADMIN'
     ? 'Super Admin'
     : user?.organizationRole === 'OWNER' || user?.organizationRole === 'ADMIN'
-    ? 'Admin (Full Access)'
-    : 'Staff Access'
+      ? 'Admin (Full Access)'
+      : 'Staff Access'
 
   return (
-    <header className="sticky top-0 z-20 flex w-full items-center justify-between border-b border-slate-200/80 bg-white/90 px-6 py-3 backdrop-blur-md shadow-xs lg:px-8">
-      {/* Left section: Workspace Title & System Status */}
-      <div className="flex items-center gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-red-600">
+    <header className="sticky top-0 z-20 flex w-full items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 sm:px-6 py-2.5 sm:py-3 backdrop-blur-md shadow-xs lg:px-8">
+      {/* Left section: Hamburger (Mobile) + Workspace Title & System Status */}
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        {/* Mobile Hamburger Toggle Button */}
+        <button
+          type="button"
+          onClick={onToggleMobileMenu}
+          className="lg:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100 active:scale-95 transition"
+          aria-label="Open Navigation Sidebar"
+        >
+          <RiMenuLine size={20} />
+        </button>
+
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider sm:tracking-widest text-red-600 truncate max-w-[120px] sm:max-w-none">
               {organizationName || 'HOTEL POS'}
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 border border-emerald-200/60">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] sm:text-[11px] font-bold text-emerald-700 border border-emerald-200/60 shrink-0">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Live System
+              Live
             </span>
           </div>
-          <h1 className="mt-0.5 text-lg font-extrabold text-slate-900 tracking-tight">
-            {organizationName ? `${organizationName} Admin Console` : 'Hotel & POS Admin Console'}
+          <h1 className="mt-0.5 text-sm sm:text-base lg:text-lg font-extrabold text-slate-900 tracking-tight truncate">
+            {organizationName ? `${organizationName} Admin Console` : 'Admin Console'}
           </h1>
         </div>
       </div>
 
       {/* Right section: POS Switcher, Search, Notifications & User Avatar */}
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         {/* Quick Launch POS Terminal Button */}
         <Link
           href="/user-dashboard"
-          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-red-900/20 hover:from-red-500 hover:to-rose-500 transition-all duration-200 active:scale-95"
+          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-[11px] sm:text-xs font-bold text-white shadow-md shadow-red-900/20 hover:from-red-500 hover:to-rose-500 transition-all duration-200 active:scale-95 shrink-0"
           title="Open POS Terminal Floor & Table View"
         >
-          <RiRestaurantLine size={16} />
-          <span>Launch POS Terminal</span>
+          <RiRestaurantLine size={15} />
+          <span className="hidden sm:inline">Launch POS Terminal</span>
+          <span className="sm:hidden">POS</span>
         </Link>
 
         {/* Search Input Bar */}
@@ -84,4 +99,4 @@ function Navbar() {
   )
 }
 
-export default Navbar
+export default Navbar

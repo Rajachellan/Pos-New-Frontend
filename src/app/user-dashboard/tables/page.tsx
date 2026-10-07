@@ -56,6 +56,20 @@ export default function FloorsAndTablesPage() {
   const [selectedAreaId, setSelectedAreaId] = useState<string>("all");
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [flashNotification, setFlashNotification] = useState<string | null>(null);
+
+  // Read any flash message (e.g. from payment completion or table release)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const msg = sessionStorage.getItem("pos_flash_message");
+      if (msg) {
+        setFlashNotification(msg);
+        sessionStorage.removeItem("pos_flash_message");
+        const timer = setTimeout(() => setFlashNotification(null), 4500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, []);
 
   // Modals
   const [showAddAreaModal, setShowAddAreaModal] = useState(false);
@@ -66,7 +80,6 @@ export default function FloorsAndTablesPage() {
 
   // Form states
   const [newAreaName, setNewAreaName] = useState("");
-  const [newAreaCode, setNewAreaCode] = useState("");
   const [newTableNumber, setNewTableNumber] = useState("");
   const [newTableAreaId, setNewTableAreaId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,20 +108,29 @@ export default function FloorsAndTablesPage() {
   const filteredModalAreas = useMemo(() => {
     if (!areaSearchQuery.trim()) return areas;
     const q = areaSearchQuery.toLowerCase();
-    return areas.filter(
-      (a) =>
-        a.areaName.toLowerCase().includes(q) ||
-        (a.areaCode && a.areaCode.toLowerCase().includes(q))
-    );
+    return areas.filter((a) => a.areaName.toLowerCase().includes(q));
   }, [areas, areaSearchQuery]);
 
   // Fetch Areas
   async function fetchAreas() {
     try {
-      const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      let savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      if (savedBranchId === "b1") {
+        localStorage.removeItem("pos_selected_branch");
+        savedBranchId = null;
+      }
       const branchQuery = savedBranchId && savedBranchId !== "ALL" ? `?branchId=${savedBranchId}` : "";
-      const res = await api.get(`/get/area/branch${branchQuery}`);
-      const data = Array.isArray(res?.data?.data) ? res.data.data : [];
+      let res = await api.get(`/get/area/branch${branchQuery}`);
+      let data = Array.isArray(res?.data?.data) ? res.data.data : [];
+
+      if (data.length === 0 && savedBranchId && savedBranchId !== "ALL") {
+        const fallbackRes = await api.get(`/get/area/branch`);
+        const fallbackData = Array.isArray(fallbackRes?.data?.data) ? fallbackRes.data.data : [];
+        if (fallbackData.length > 0) {
+          data = fallbackData;
+        }
+      }
+
       setAreas(data);
       if (data.length > 0 && !newTableAreaId) {
         setNewTableAreaId(data[0]._id);
@@ -121,10 +143,23 @@ export default function FloorsAndTablesPage() {
   // Fetch Tables
   async function fetchTables() {
     try {
-      const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      let savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      if (savedBranchId === "b1") {
+        localStorage.removeItem("pos_selected_branch");
+        savedBranchId = null;
+      }
       const branchQuery = savedBranchId && savedBranchId !== "ALL" ? `?branchId=${savedBranchId}` : "";
-      const res = await api.get(`/get/tables/branch${branchQuery}`);
-      const data = Array.isArray(res?.data?.data) ? res.data.data : [];
+      let res = await api.get(`/get/tables/branch${branchQuery}`);
+      let data = Array.isArray(res?.data?.data) ? res.data.data : [];
+
+      if (data.length === 0 && savedBranchId && savedBranchId !== "ALL") {
+        const fallbackRes = await api.get(`/get/tables/branch`);
+        const fallbackData = Array.isArray(fallbackRes?.data?.data) ? fallbackRes.data.data : [];
+        if (fallbackData.length > 0) {
+          data = fallbackData;
+        }
+      }
+
       setTables(data);
     } catch (err) {
       console.error("Error fetching tables", err);
@@ -234,20 +269,17 @@ export default function FloorsAndTablesPage() {
     setIsSubmitting(true);
     setFormError("");
     try {
-      const code =
-        newAreaCode.trim() ||
-        newAreaName
-          .trim()
-          .slice(0, 3)
-          .toUpperCase();
-
+      let savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+      if (savedBranchId === "b1") {
+        localStorage.removeItem("pos_selected_branch");
+        savedBranchId = null;
+      }
       await api.post("/add/area", {
         areaName: newAreaName.trim(),
-        areaCode: code,
+        branchName: savedBranchId && savedBranchId !== "ALL" ? savedBranchId : undefined,
       });
 
       setNewAreaName("");
-      setNewAreaCode("");
       setShowAddAreaModal(false);
       await fetchAreas();
     } catch (err) {
@@ -286,7 +318,34 @@ export default function FloorsAndTablesPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 bg-[#f8fafc] min-h-screen text-slate-800">
+    <div className="p-6 md:p-8 bg-[#f8fafc] min-h-screen text-slate-800 relative">
+      {/* Flash Success Notification */}
+      <AnimatePresence>
+        {flashNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-5 right-6 z-50 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-bold border border-emerald-500 max-w-md"
+          >
+            <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center shrink-0 text-white">
+              <FiCheck size={16} />
+            </div>
+            <div className="flex-1">
+              <p className="leading-tight">{flashNotification}</p>
+              <p className="text-[10px] text-emerald-100 font-medium mt-0.5">Ready to seat & occupy the next customer.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFlashNotification(null)}
+              className="p-1 rounded-lg text-emerald-200 hover:text-white transition cursor-pointer"
+            >
+              <FiX size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 1. Header Row (Title, Subtitle & Top Right Action Buttons) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
@@ -586,23 +645,20 @@ export default function FloorsAndTablesPage() {
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {[
-                    { name: "Ground Floor", code: "GF" },
-                    { name: "1st Floor", code: "1F" },
-                    { name: "2nd Floor", code: "2F" },
-                    { name: "Rooftop Lounge", code: "RT" },
-                    { name: "AC Dining", code: "AC" },
-                    { name: "Outdoor Patio", code: "OD" },
-                  ].map((preset) => (
+                    "Ground Floor",
+                    "1st Floor",
+                    "2nd Floor",
+                    "Rooftop Lounge",
+                    "AC Dining",
+                    "Outdoor Patio",
+                  ].map((presetName) => (
                     <button
-                      key={preset.name}
+                      key={presetName}
                       type="button"
-                      onClick={() => {
-                        setNewAreaName(preset.name);
-                        setNewAreaCode(preset.code);
-                      }}
+                      onClick={() => setNewAreaName(presetName)}
                       className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-red-50 hover:text-red-700 hover:border-red-200 border border-transparent text-gray-700 transition cursor-pointer"
                     >
-                      {preset.name}
+                      {presetName}
                     </button>
                   ))}
                 </div>
@@ -629,34 +685,10 @@ export default function FloorsAndTablesPage() {
                       required
                       placeholder="e.g. Garden, Roof Top, 3rd Floor"
                       value={newAreaName}
-                      onChange={(e) => {
-                        setNewAreaName(e.target.value);
-                        if (!newAreaCode) {
-                          setNewAreaCode(
-                            e.target.value
-                              .replace(/[^a-zA-Z0-9]/g, "")
-                              .slice(0, 3)
-                              .toUpperCase()
-                          );
-                        }
-                      }}
+                      onChange={(e) => setNewAreaName(e.target.value)}
                       className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium focus:outline-hidden focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                    Area Code (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. GD, RT, 3F"
-                    value={newAreaCode}
-                    onChange={(e) => setNewAreaCode(e.target.value.toUpperCase())}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium focus:outline-hidden focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition"
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1">Short identifier used on tickets and floor maps</p>
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
@@ -770,11 +802,6 @@ export default function FloorsAndTablesPage() {
                       <span className="font-bold text-gray-800 truncate">
                         {selectedAreaObj ? selectedAreaObj.areaName : "Select an Area"}
                       </span>
-                      {selectedAreaObj?.areaCode && (
-                        <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold">
-                          {selectedAreaObj.areaCode}
-                        </span>
-                      )}
                     </div>
                     <FiChevronDown
                       className={`text-gray-400 transition-transform duration-200 shrink-0 ${
@@ -828,11 +855,6 @@ export default function FloorsAndTablesPage() {
                               >
                                 <div className="flex items-center gap-2 truncate">
                                   <span className="truncate">{area.areaName}</span>
-                                  {area.areaCode && (
-                                    <span className="px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 text-[10px] font-bold">
-                                      {area.areaCode}
-                                    </span>
-                                  )}
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <span className="text-[10px] text-gray-400">

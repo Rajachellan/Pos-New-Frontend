@@ -11,19 +11,24 @@ import {
   RiUserLine,
   RiSettings3Line,
   RiLogoutBoxLine,
-  RiShieldUserLine,
   RiShieldCheckLine,
 } from "react-icons/ri"
-import { MdMeetingRoom, MdOutlineBorderColor, MdRestaurantMenu } from "react-icons/md"
+import { MdMeetingRoom, MdRestaurantMenu } from "react-icons/md"
 import { PiMapPinSimpleAreaFill } from "react-icons/pi"
 import { FaHistory } from "react-icons/fa"
 import { SiJirasoftware } from "react-icons/si"
+import { FiX } from "react-icons/fi"
 import { useAuth } from '@/src/app/context/AuthContext'
 
-export default function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  setMobileOpen?: (open: boolean) => void;
+}
+
+export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const { user, organizationName, organizationRole, isAdmin, isManager, isStaff, isSuperAdmin, logout } = useAuth()
+  const { user, organizationName, isAdmin, isManager, isSuperAdmin, logout } = useAuth()
 
   const displayName = user?.name || user?.username || "Staff User"
   const userRoleDisplay = isSuperAdmin()
@@ -59,14 +64,24 @@ export default function Sidebar() {
       icon: RiRestaurantLine,
     },
     {
-      label: "Menu Management",
-      href: "/user-dashboard/menu-management",
-      icon: MdRestaurantMenu,
+      label: "Live Kitchen (KDS)",
+      href: "/user-dashboard/kitchen",
+      icon: RiFileList3Line,
     },
     {
-      label: "Current Orders",
-      href: "/user-dashboard/order-history?tab=ACTIVE",
-      icon: MdOutlineBorderColor,
+      label: "Kitchen Display TV",
+      href: "/user-dashboard/kitchen/tv",
+      icon: RiTv2Line,
+    },
+    {
+      label: "Customer Calling TV",
+      href: "/user-dashboard/kitchen/customer-tv",
+      icon: RiTv2Line,
+    },
+    {
+      label: "Hotel Rooms",
+      href: "/user-dashboard/rooms",
+      icon: MdMeetingRoom,
     },
     {
       label: "Order History",
@@ -74,24 +89,9 @@ export default function Sidebar() {
       icon: FaHistory,
     },
     {
-      label: "KDS (Kitchen)",
-      href: "/user-dashboard/kitchen",
-      icon: RiFileList3Line,
-    },
-    {
-      label: "Customer TV",
-      href: "/user-dashboard/kitchen/customer-tv",
-      icon: RiTv2Line,
-    },
-    {
-      label: "Rooms",
-      href: "/user-dashboard/rooms",
-      icon: MdMeetingRoom,
-    },
-    {
-      label: "Room History",
-      href: "/user-dashboard/rooms/history",
-      icon: FaHistory,
+      label: "Menu Management",
+      href: "/user-dashboard/menu-management",
+      icon: MdRestaurantMenu,
     },
     {
       label: "Settings",
@@ -105,32 +105,48 @@ export default function Sidebar() {
     },
   ]
 
-  return (
-    <aside className="h-screen sticky left-0 top-0 flex flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 w-64 p-4 text-white z-40 select-none flex-shrink-0 shadow-2xl">
+  const renderContent = (isMobile = false) => (
+    <div className="flex h-full flex-col justify-between select-none">
       <div className="flex flex-col gap-4 overflow-y-auto pr-1">
         {/* Brand Header */}
-        <div className="flex items-center gap-3 px-2 pt-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-red-600 to-rose-500 shadow-md shadow-red-900/40">
-            <SiJirasoftware className="text-white" size={20} />
-          </div>
-          <div className="truncate">
-            <h2 className="font-black text-sm tracking-wide text-white uppercase truncate">
-              {organizationName || "HOTEL POS"}
-            </h2>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase border ${roleColorBadge}`}>
-                {userRoleDisplay}
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium">Terminal</span>
+        <div className="flex items-center justify-between px-2 pt-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-red-600 to-rose-500 shadow-md shadow-red-900/40">
+              <SiJirasoftware className="text-white" size={20} />
+            </div>
+            <div className="truncate">
+              <h2 className="font-black text-sm tracking-wide text-white uppercase truncate">
+                {organizationName || "HOTEL POS"}
+              </h2>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wider uppercase border ${roleColorBadge}`}>
+                  {userRoleDisplay}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Terminal</span>
+              </div>
             </div>
           </div>
+
+          {/* Close button on mobile */}
+          {isMobile && (
+            <button
+              onClick={() => setMobileOpen?.(false)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 active:scale-95 transition"
+              aria-label="Close menu"
+            >
+              <FiX size={20} />
+            </button>
+          )}
         </div>
 
-        {/* Quick Link to Admin Console (Only visible to Admins) */}
-        {isAdmin() && (
+        {/* Quick Link to Admin Console (Visible to Admins and Managers) */}
+        {(isAdmin() || isManager()) && (
           <div className="px-1 pt-1">
             <Link
               href="/admin-dashboard"
+              onClick={() => {
+                if (isMobile) setMobileOpen?.(false);
+              }}
               className="group flex items-center justify-between gap-2.5 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 p-2.5 border border-red-900/40 hover:border-red-600/70 hover:bg-slate-800/90 transition shadow-sm"
             >
               <div className="flex items-center gap-2.5 min-w-0">
@@ -163,16 +179,27 @@ export default function Sidebar() {
 
             return (
               <Link
-                key={item.label}
+                key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
+                onClick={() => {
+                  if (isMobile) setMobileOpen?.(false);
+                }}
+                className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-150 ${
                   isActive
-                    ? "bg-red-600 text-white shadow-md shadow-red-900/40 font-bold"
-                    : "text-slate-400 hover:bg-slate-800/70 hover:text-white"
+                    ? "bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-950/40"
+                    : "text-slate-400 hover:text-slate-100 hover:bg-slate-900/90"
                 }`}
               >
-                <Icon size={18} className={isActive ? "text-white" : "text-slate-400"} />
-                <span>{item.label}</span>
+                <Icon
+                  size={18}
+                  className={`transition-transform duration-150 group-hover:scale-110 ${
+                    isActive ? "text-white" : "text-slate-400 group-hover:text-red-400"
+                  }`}
+                />
+                <span className="truncate">{item.label}</span>
+                {isActive && (
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                )}
               </Link>
             )
           })}
@@ -182,7 +209,10 @@ export default function Sidebar() {
       {/* Bottom User Card & Sign Out */}
       <div className="pt-3 border-t border-slate-800/80 space-y-2">
         <div
-          onClick={() => router.push("/user-dashboard/profile")}
+          onClick={() => {
+            if (isMobile) setMobileOpen?.(false);
+            router.push("/user-dashboard/profile");
+          }}
           className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:bg-slate-800/90 transition cursor-pointer"
         >
           <div className="flex items-center gap-2.5 min-w-0">
@@ -211,6 +241,31 @@ export default function Sidebar() {
           <span>Sign Out</span>
         </button>
       </div>
-    </aside>
+    </div>
+  )
+
+  return (
+    <>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden lg:flex h-screen sticky left-0 top-0 flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 w-64 p-4 text-white z-40 select-none flex-shrink-0 shadow-2xl">
+        {renderContent(false)}
+      </aside>
+
+      {/* Mobile Slide-Over Drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          {/* Backdrop */}
+          <div
+            onClick={() => setMobileOpen?.(false)}
+            className="fixed inset-0 bg-black/75 backdrop-blur-xs transition-opacity duration-300"
+          />
+
+          {/* Drawer Panel */}
+          <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] flex flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 p-4 text-white z-50 animate-in slide-in-from-left duration-250 shadow-2xl">
+            {renderContent(true)}
+          </aside>
+        </div>
+      )}
+    </>
   )
 }

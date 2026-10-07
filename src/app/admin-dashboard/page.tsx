@@ -159,42 +159,42 @@ export default function AdminOverviewPage() {
   ]
 
   return (
-    <div className="p-6 lg:p-10 space-y-8 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-10 space-y-6 sm:space-y-8 max-w-7xl mx-auto">
       {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-red-950 p-8 lg:p-10 text-white shadow-xl">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-red-950 p-5 sm:p-8 lg:p-10 text-white shadow-xl">
         <div className="absolute right-0 top-0 -mr-16 -mt-16 h-64 w-64 rounded-full bg-red-600/10 blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3 max-w-2xl">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-red-300 backdrop-blur-md border border-white/10">
-              <RiShieldUserLine size={16} />
+          <div className="space-y-2.5 sm:space-y-3 max-w-2xl">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] sm:text-xs font-bold uppercase tracking-wider text-red-300 backdrop-blur-md border border-white/10">
+              <RiShieldUserLine size={15} />
               <span>{isSuperAdmin() ? 'Super-Admin Portal' : 'Admin Management Console'}</span>
             </div>
-            <h1 className="text-3xl lg:text-4xl font-extrabold tracking-tight">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight">
               {organizationName ? `${organizationName} Control Center` : 'Hotel Control Center & Management'}
             </h1>
-            <p className="text-sm text-slate-300 leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
               Seamlessly manage your hotel branch hierarchy, configure custom dining layouts, assign floor tables, catalog menu items, and onboard staff accounts across all locations.
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0">
+          <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 flex-shrink-0 w-full sm:w-auto">
             <Link
               href="/admin-dashboard/finance"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 transition duration-200"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 sm:px-5 py-2.5 sm:py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 transition duration-200"
             >
               <RiLineChartLine size={15} />
               <span>Finances & Sales</span>
             </Link>
             <Link
               href="/admin-dashboard/add-branch"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-red-900/40 hover:bg-red-500 transition duration-200"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 sm:px-5 py-2.5 sm:py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-red-900/40 hover:bg-red-500 transition duration-200"
             >
               <FaCodeBranch size={15} />
               <span>Add New Branch</span>
             </Link>
             <Link
               href="/user-dashboard"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white backdrop-blur-md border border-white/20 hover:bg-white/20 transition duration-200"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 sm:px-5 py-2.5 sm:py-3 text-xs font-bold uppercase tracking-wider text-white backdrop-blur-md border border-white/20 hover:bg-white/20 transition duration-200"
             >
               <RiRestaurantLine size={16} />
               <span>Live POS View</span>
@@ -204,7 +204,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
         {kpiCards.map((kpi) => {
           const Icon = kpi.icon
           return (
@@ -282,4 +282,4 @@ export default function AdminOverviewPage() {
       </div>
     </div>
   )
-}
+}

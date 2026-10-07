@@ -400,11 +400,10 @@ export default function RolesManagementPage() {
                             return (
                               <label
                                 key={p._id}
-                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition ${
-                                  isChecked
+                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition ${isChecked
                                     ? "bg-red-50/70 border-red-300 text-red-950 font-medium"
                                     : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
-                                }`}
+                                  }`}
                               >
                                 <input
                                   type="checkbox"

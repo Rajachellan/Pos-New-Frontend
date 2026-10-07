@@ -218,7 +218,7 @@ export default function AddAreasPage() {
         filterBranchId === 'ALL' ||
         (area.branchName as any)?._id === filterBranchId ||
         area.branchName?.branchName ===
-          branchData.find((b) => b._id === filterBranchId)?.branchName
+        branchData.find((b) => b._id === filterBranchId)?.branchName
 
       return matchesSearch && matchesBranch
     })
@@ -286,11 +286,10 @@ export default function AddAreasPage() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold shadow-xs ${
-            notification.type === 'success'
+          className={`flex items-center justify-between rounded-2xl p-4 border text-xs font-semibold shadow-xs ${notification.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : 'bg-red-50 text-red-800 border-red-200'
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2.5">
             {notification.type === 'success' ? (
@@ -387,20 +386,6 @@ export default function AddAreasPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Area Identifier Code *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. 1F, RT-01, AC-HALL"
-                  value={areaCode}
-                  onChange={(e) => setAreaCode(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-xs font-mono uppercase tracking-wider text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
-                />
-              </div>
-
               <div className="pt-2 flex gap-2">
                 <button
                   type="submit"
@@ -412,8 +397,8 @@ export default function AddAreasPage() {
                       ? 'Updating Section...'
                       : 'Creating Section...'
                     : editingArea
-                    ? 'Update Section'
-                    : 'Create Dining Area'}
+                      ? 'Update Section'
+                      : 'Create Dining Area'}
                 </button>
                 {editingArea && (
                   <button
@@ -442,11 +427,10 @@ export default function AddAreasPage() {
               <button
                 type="button"
                 onClick={() => setFilterBranchId('ALL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-                  filterBranchId === 'ALL'
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${filterBranchId === 'ALL'
                     ? 'bg-red-600 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                  }`}
               >
                 All Branches ({areaDatas.length})
               </button>
@@ -461,11 +445,10 @@ export default function AddAreasPage() {
                     key={b._id}
                     type="button"
                     onClick={() => setFilterBranchId(b._id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-                      filterBranchId === b._id
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${filterBranchId === b._id
                         ? 'bg-red-600 text-white shadow-xs'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
+                      }`}
                   >
                     {b.branchName} ({count})
                   </button>
@@ -492,11 +475,10 @@ export default function AddAreasPage() {
                   <button
                     type="button"
                     onClick={() => setViewMode('grid')}
-                    className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      viewMode === 'grid'
+                    className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${viewMode === 'grid'
                         ? 'bg-white text-red-600 shadow-xs'
                         : 'text-slate-500 hover:text-slate-900'
-                    }`}
+                      }`}
                     title="Grid View"
                   >
                     <RiGridFill size={15} />
@@ -504,11 +486,10 @@ export default function AddAreasPage() {
                   <button
                     type="button"
                     onClick={() => setViewMode('table')}
-                    className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      viewMode === 'table'
+                    className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${viewMode === 'table'
                         ? 'bg-white text-red-600 shadow-xs'
                         : 'text-slate-500 hover:text-slate-900'
-                    }`}
+                      }`}
                     title="Table View"
                   >
                     <RiListCheck2 size={15} />
@@ -556,11 +537,10 @@ export default function AddAreasPage() {
                 return (
                   <div
                     key={area._id}
-                    className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${
-                      isEditing
+                    className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-5 shadow-xs transition duration-200 hover:shadow-md ${isEditing
                         ? 'border-red-500 ring-2 ring-red-200'
                         : 'border-slate-200/90 hover:border-red-300'
-                    }`}
+                      }`}
                   >
                     <div>
                       {/* Top Row: Icon + Title + Status */}
@@ -573,9 +553,6 @@ export default function AddAreasPage() {
                             <h3 className="text-sm font-extrabold text-slate-900 group-hover:text-red-600 transition truncate">
                               {area.areaName}
                             </h3>
-                            <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-bold text-slate-600 mt-0.5">
-                              CODE: {area.areaCode}
-                            </span>
                           </div>
                         </div>
 
@@ -630,7 +607,6 @@ export default function AddAreasPage() {
                 <thead className="bg-slate-50 text-[10px] uppercase font-extrabold tracking-wider text-slate-400 border-b border-slate-200">
                   <tr>
                     <th className="py-3 px-4">Section Name</th>
-                    <th className="py-3 px-4">Identifier Code</th>
                     <th className="py-3 px-4">Assigned Branch</th>
                     <th className="py-3 px-4 text-center">Status</th>
                     <th className="py-3 px-4 text-center">Actions</th>
@@ -646,9 +622,6 @@ export default function AddAreasPage() {
                           </div>
                           <span className="font-bold text-slate-900">{area.areaName}</span>
                         </div>
-                      </td>
-                      <td className="py-3 px-4 font-mono font-bold text-slate-700">
-                        {area.areaCode}
                       </td>
                       <td className="py-3 px-4 text-slate-700">
                         <span className="inline-flex items-center gap-1">
@@ -721,11 +694,10 @@ export default function AddAreasPage() {
                       key={idx}
                       type="button"
                       onClick={() => setCurrentPage(p)}
-                      className={`min-w-8 h-8 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        validCurrentPage === p
+                      className={`min-w-8 h-8 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${validCurrentPage === p
                           ? 'bg-red-600 text-white shadow-xs'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
+                        }`}
                     >
                       {p}
                     </button>
@@ -781,7 +753,7 @@ export default function AddAreasPage() {
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
                 Are you sure you want to permanently delete area{' '}
-                <strong className="text-slate-900">"{deleteModalArea.areaName}"</strong> ({deleteModalArea.areaCode})?
+                <strong className="text-slate-900">"{deleteModalArea.areaName}"</strong>?
                 Please ensure no active tables are assigned to this dining area.
               </p>
               <div className="flex items-center justify-end gap-3 pt-2">
