@@ -13,6 +13,10 @@ import {
   FiClock,
   FiDollarSign,
   FiLayers,
+  FiUploadCloud,
+  FiTrash2,
+  FiImage,
+  FiAlertCircle,
 } from "react-icons/fi";
 import { BiRestaurant } from "react-icons/bi";
 
@@ -23,11 +27,16 @@ export default function SettingsPage() {
   // Settings State
   const [restaurantName, setRestaurantName] = useState("TANJAVOOR RESTAURANT");
   const [tagline, setTagline] = useState("Authentic Chettinad & South Indian Cuisine");
+  const [logoUrl, setLogoUrl] = useState("");
   const [phone, setPhone] = useState("+91 98765 43210");
   const [address, setAddress] = useState("12/4 Gandhi Road, Tanjavoor, Tamil Nadu - 613001");
   const [fssaiLicense, setFssaiLicense] = useState("12423004000123");
   const [gstin, setGstin] = useState("33AAAAA0000A1Z5");
-  
+
+  // Logo upload state
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoError, setLogoError] = useState("");
+
   // Tax & Charges
   const [enableGst, setEnableGst] = useState(true);
   const [gstRate, setGstRate] = useState<number>(5.0);
@@ -41,13 +50,14 @@ export default function SettingsPage() {
   const [tableLockTimeout, setTableLockTimeout] = useState<number>(45);
 
   useEffect(() => {
-    // Load existing settings if available in localStorage
+    // 1. Load existing local settings if available
     const savedConfig = localStorage.getItem("pos_terminal_settings");
     if (savedConfig) {
       try {
         const parsed = JSON.parse(savedConfig);
         if (parsed.restaurantName) setRestaurantName(parsed.restaurantName);
         if (parsed.tagline) setTagline(parsed.tagline);
+        if (parsed.logoUrl) setLogoUrl(parsed.logoUrl);
         if (parsed.phone) setPhone(parsed.phone);
         if (parsed.address) setAddress(parsed.address);
         if (parsed.gstin) setGstin(parsed.gstin);
@@ -62,13 +72,112 @@ export default function SettingsPage() {
         console.error("Error reading saved config:", err);
       }
     }
+
+    // 2. Fetch organization profile to sync backend logo & hotel details
+    const fetchOrgProfile = async () => {
+      try {
+        const res = await api.get("/organizations/profile");
+        if (res.data?.success && res.data.data?.organization) {
+          const org = res.data.data.organization;
+          if (org.logoUrl) setLogoUrl(org.logoUrl);
+          if (org.name && !savedConfig) setRestaurantName(org.name);
+          if (org.phno && !savedConfig) setPhone(org.phno);
+          if (org.address && !savedConfig) setAddress(org.address);
+          if (org.gstNumber && !savedConfig) setGstin(org.gstNumber);
+        }
+      } catch (err) {
+        // Non-blocking if endpoint is permission-gated or offline
+        console.log("Organization profile fetch:", err);
+      }
+    };
+
+    fetchOrgProfile();
   }, []);
 
-  const handleSave = () => {
+  // Handle Logo Upload to Cloudflare R2
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setLogoError("Please select a valid image file (PNG, JPG, WEBP, SVG)");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setLogoError("Image size must be less than 10MB");
+      return;
+    }
+
+    setUploadingLogo(true);
+    setLogoError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "logos");
+
+      const res = await api.post("/upload/image", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (res.data?.success && res.data.url) {
+        const uploadedUrl = res.data.url;
+        setLogoUrl(uploadedUrl);
+
+        // Update local storage immediately
+        const savedConfig = localStorage.getItem("pos_terminal_settings");
+        const parsed = savedConfig ? JSON.parse(savedConfig) : {};
+        localStorage.setItem(
+          "pos_terminal_settings",
+          JSON.stringify({ ...parsed, logoUrl: uploadedUrl })
+        );
+
+        // Persist to Organization profile
+        try {
+          await api.put("/organizations/settings", { logoUrl: uploadedUrl });
+        } catch (syncErr) {
+          console.warn("Could not sync logo to organization:", syncErr);
+        }
+      } else {
+        setLogoError(res.data?.message || "Failed to upload image");
+      }
+    } catch (err: any) {
+      console.error("Logo upload error:", err);
+      setLogoError(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to upload logo to Cloudflare R2"
+      );
+    } finally {
+      setUploadingLogo(false);
+      // Reset input
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    setLogoUrl("");
+    const savedConfig = localStorage.getItem("pos_terminal_settings");
+    const parsed = savedConfig ? JSON.parse(savedConfig) : {};
+    localStorage.setItem(
+      "pos_terminal_settings",
+      JSON.stringify({ ...parsed, logoUrl: "" })
+    );
+
+    try {
+      await api.put("/organizations/settings", { logoUrl: "" });
+    } catch (err) {
+      console.warn("Error removing org logo:", err);
+    }
+  };
+
+  const handleSave = async () => {
     setLoading(true);
     const config = {
       restaurantName,
       tagline,
+      logoUrl,
       phone,
       address,
       fssaiLicense,
@@ -84,6 +193,23 @@ export default function SettingsPage() {
     };
 
     localStorage.setItem("pos_terminal_settings", JSON.stringify(config));
+
+    // Also persist organization updates to backend
+    try {
+      await api.put("/organizations/settings", {
+        name: restaurantName,
+        phno: phone,
+        address,
+        gstNumber: gstin,
+        logoUrl,
+        settings: {
+          currency: currencySymbol,
+          taxPercentage: gstRate,
+        },
+      });
+    } catch (err) {
+      console.log("Organization sync notice:", err);
+    }
 
     setTimeout(() => {
       setLoading(false);
@@ -101,14 +227,14 @@ export default function SettingsPage() {
             <FiSettings className="text-[#e02424]" /> POS & Branch Settings
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Configure restaurant identity, GST tax calculations, receipt templates, and operational preferences.
+            Configure restaurant identity, Cloudflare R2 logo, GST tax calculations, receipt templates, and operational preferences.
           </p>
         </div>
 
         <button
           onClick={handleSave}
           disabled={loading}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#e02424] text-white rounded-xl text-sm font-semibold hover:bg-[#c81e1e] transition shadow-xs w-fit"
+          className="flex items-center gap-2 px-5 py-2.5 bg-[#e02424] text-white rounded-xl text-sm font-semibold hover:bg-[#c81e1e] transition shadow-xs w-fit cursor-pointer disabled:opacity-50"
         >
           {loading ? (
             <span>Saving...</span>
@@ -125,8 +251,97 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Business & Branch Details */}
+        {/* Left Column: Business & Branch Details & Logo */}
         <div className="lg:col-span-2 space-y-6">
+          
+          {/* 1. Hotel / Restaurant Logo Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+              <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <FiImage className="text-[#e02424] text-xl" /> Hotel & Restaurant Logo
+              </h2>
+              <span className="text-[11px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full flex items-center gap-1">
+                <FiUploadCloud size={13} /> Cloudflare R2 Storage
+              </span>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-4">
+              Upload your official restaurant/hotel logo. It will automatically be printed on all customer POS receipts, KOT bills, and transaction invoices.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-gray-50/80 rounded-2xl border border-gray-200">
+              {/* Preview Box */}
+              <div className="relative w-32 h-32 rounded-2xl bg-white border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt="Hotel Logo Preview"
+                    className="w-full h-full object-contain p-2"
+                  />
+                ) : (
+                  <div className="text-center p-2 text-gray-400">
+                    <BiRestaurant size={36} className="mx-auto text-gray-300 mb-1" />
+                    <span className="text-[10px] font-bold block">No Logo</span>
+                  </div>
+                )}
+
+                {uploadingLogo && (
+                  <div className="absolute inset-0 bg-white/80 backdrop-blur-xs flex flex-col items-center justify-center gap-1 text-[#e02424]">
+                    <div className="w-5 h-5 border-2 border-[#e02424] border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-bold">Uploading...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Upload Controls */}
+              <div className="flex-1 w-full space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 px-4 py-2.5 bg-[#e02424] hover:bg-[#c81e1e] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-xs">
+                    <FiUploadCloud size={16} />
+                    <span>{logoUrl ? "Replace Logo" : "Upload Logo to R2"}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      disabled={uploadingLogo}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {logoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="flex items-center gap-1.5 px-3.5 py-2.5 bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      <FiTrash2 size={14} /> Remove
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 mb-1">
+                    Or Enter Public Logo URL directly:
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://pub-xxxxxx.r2.dev/logos/logo.png"
+                    value={logoUrl}
+                    onChange={(e) => setLogoUrl(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
+                  />
+                </div>
+
+                {logoError && (
+                  <p className="text-xs text-red-600 flex items-center gap-1 font-semibold">
+                    <FiAlertCircle size={14} /> {logoError}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Restaurant & Branch Information */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
               <BiRestaurant className="text-[#e02424] text-xl" /> Restaurant & Branch Information
@@ -195,7 +410,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Tax & GST Setup */}
+          {/* 3. Tax & GST Setup */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
               <FiPercent className="text-[#e02424] text-lg" /> GST & Tax Settings
@@ -274,11 +489,85 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Right Column: Print & Operational Preferences */}
+        {/* Right Column: Live Receipt Preview & Operational Preferences */}
         <div className="space-y-6">
+          
+          {/* Live Receipt Preview with Hotel Logo */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
+            <h2 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-3 pb-3 border-b border-gray-100">
+              <FiPrinter className="text-[#e02424] text-lg" /> Live Receipt Preview
+            </h2>
+            <p className="text-xs text-gray-500 mb-4">
+              Real-time preview of how your logo and restaurant header print on thermal paper:
+            </p>
+
+            {/* Thermal Slip Mockup */}
+            <div className="bg-amber-50/40 p-4 rounded-2xl border border-amber-200/70 font-mono text-xs text-slate-800 space-y-2 shadow-inner">
+              <div className="text-center pb-2 border-b border-dashed border-slate-400/60">
+                {logoUrl ? (
+                  <div className="flex justify-center mb-1.5">
+                    <img
+                      src={logoUrl}
+                      alt="Receipt Logo"
+                      className="max-h-12 max-w-[120px] object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="inline-block p-1 bg-gray-200 rounded text-[10px] text-gray-600 mb-1">
+                    [No Logo Uploaded]
+                  </div>
+                )}
+                <p className="font-black text-sm uppercase tracking-wide">{restaurantName || "RESTAURANT NAME"}</p>
+                <p className="text-[10px] text-slate-500">{tagline}</p>
+                <p className="text-[10px] text-slate-500">{phone}</p>
+                <p className="text-[9px] text-slate-400 truncate">{address}</p>
+                {gstin && <p className="text-[9px] font-bold text-slate-600">GSTIN: {gstin}</p>}
+                {fssaiLicense && <p className="text-[9px] text-slate-500">FSSAI: {fssaiLicense}</p>}
+              </div>
+
+              <div className="flex justify-between text-[10px] text-slate-500 py-1">
+                <span>Date: {new Date().toLocaleDateString()}</span>
+                <span>Table: T1</span>
+              </div>
+
+              <div className="border-t border-b border-dashed border-slate-400/60 py-1.5 space-y-1 text-[11px]">
+                <div className="flex justify-between">
+                  <span>Sample Item x2</span>
+                  <span className="font-bold">{currencySymbol}240.00</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Beverage x1</span>
+                  <span className="font-bold">{currencySymbol}60.00</span>
+                </div>
+              </div>
+
+              <div className="space-y-0.5 text-right text-[11px] pt-1">
+                <div className="flex justify-between text-slate-500">
+                  <span>Subtotal:</span>
+                  <span>{currencySymbol}300.00</span>
+                </div>
+                {enableGst && (
+                  <div className="flex justify-between text-slate-500">
+                    <span>GST ({gstRate}%):</span>
+                    <span>{currencySymbol}{(300 * (gstRate / 100)).toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-black text-xs text-[#e02424] pt-1 border-t border-slate-300">
+                  <span>Total Amount:</span>
+                  <span>{currencySymbol}{(300 + (enableGst ? 300 * (gstRate / 100) : 0)).toFixed(2)}</span>
+                </div>
+              </div>
+
+              <p className="text-center text-[9px] text-slate-400 pt-2 border-t border-dashed border-slate-400/60">
+                Thank You! Please Visit Again.
+              </p>
+            </div>
+          </div>
+
+          {/* Operational Settings */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
-              <FiPrinter className="text-[#e02424] text-lg" /> Receipt & KOT Printing
+              <FiSettings className="text-[#e02424] text-lg" /> Printing Preferences
             </h2>
 
             <div className="space-y-4">
@@ -324,25 +613,25 @@ export default function SettingsPage() {
 
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
-              <FiShield className="text-[#e02424] text-lg" /> POS Security & Workflow
+              <FiShield className="text-[#e02424] text-lg" /> POS & Storage Security
             </h2>
 
             <div className="space-y-3">
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl">
-                <p className="text-xs font-medium text-blue-900">
-                  <strong>Strict POS Lifecycle Enforced:</strong>
+              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl">
+                <p className="text-xs font-medium text-amber-900">
+                  <strong>Cloudflare R2 Object Storage:</strong>
                 </p>
-                <p className="text-xs text-blue-700 mt-1 leading-relaxed">
-                  Tables automatically synchronize status from <code>AVAILABLE</code> to <code>OCCUPIED</code> on cart order, transition to <code>KITCHEN/KDS</code>, and release back to <code>AVAILABLE</code> upon full payment settlement.
+                <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                  Fast CDN delivery without egress fees. All uploaded hotel logos and menu photos are stored securely with zero bandwidth charges.
                 </p>
               </div>
 
-              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl">
-                <p className="text-xs font-medium text-emerald-900">
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl">
+                <p className="text-xs font-medium text-blue-900">
                   <strong>Multi-Tenant Data Isolation:</strong>
                 </p>
-                <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                  Branch and organization tokens are scoped in all backend API requests.
+                <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                  Organization branding and tokens are automatically scoped to your branch.
                 </p>
               </div>
             </div>

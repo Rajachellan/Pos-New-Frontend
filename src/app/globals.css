@@ -209,3 +209,33 @@ h6 {
 .animate-marquee:hover {
   animation-play-state: paused;
 }
+
+/* ========================================================================= */
+/* POS THERMAL RECEIPT PRINT STYLES                                          */
+/* ========================================================================= */
+@media print {
+  body {
+    background: #ffffff !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 8px !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    border: none !important;
+    box-shadow: none !important;
+    font-family: monospace, 'Courier New', Courier !important;
+  }
+}

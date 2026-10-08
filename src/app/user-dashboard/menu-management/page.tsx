@@ -17,6 +17,8 @@ import {
   FiRefreshCw,
   FiAlertCircle,
   FiTag,
+  FiUploadCloud,
+  FiImage,
 } from "react-icons/fi";
 import { MdRestaurantMenu, MdFastfood } from "react-icons/md";
 
@@ -26,6 +28,7 @@ interface MenuItem {
   name: string;
   price: number;
   description?: string;
+  imageUrl?: string;
   isAvailable: boolean;
   createdAt?: string;
 }
@@ -50,6 +53,8 @@ export default function MenuManagementPage() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [itemPrice, setItemPrice] = useState<number | string>("");
   const [itemDescription, setItemDescription] = useState("");
+  const [itemImageUrl, setItemImageUrl] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [itemAvailable, setItemAvailable] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
@@ -110,6 +115,49 @@ export default function MenuManagementPage() {
     });
   }, [menuItems, selectedCategory, searchQuery]);
 
+  // Image Upload to Cloudflare R2
+  const handleItemImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setFormError("Please select a valid image file (PNG, JPG, WEBP, SVG)");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setFormError("Image size must be less than 10MB");
+      return;
+    }
+
+    setUploadingImage(true);
+    setFormError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "menus");
+
+      const res = await api.post("/upload/image", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (res.data?.success && res.data.url) {
+        setItemImageUrl(res.data.url);
+      } else {
+        setFormError(res.data?.message || "Failed to upload image");
+      }
+    } catch (err: any) {
+      console.error("Image upload failed", err);
+      setFormError(
+        err.response?.data?.message || err.message || "Failed to upload image to Cloudflare R2"
+      );
+    } finally {
+      setUploadingImage(false);
+      e.target.value = "";
+    }
+  };
+
   // Open Add Modal
   const openAddModal = (presetCategory?: string) => {
     setItemName("");
@@ -121,6 +169,7 @@ export default function MenuManagementPage() {
     setIsNewCategoryMode(false);
     setItemPrice("");
     setItemDescription("");
+    setItemImageUrl("");
     setItemAvailable(true);
     setFormError("");
     setShowAddModal(true);
@@ -134,6 +183,7 @@ export default function MenuManagementPage() {
     setIsNewCategoryMode(false);
     setItemPrice(item.price);
     setItemDescription(item.description || "");
+    setItemImageUrl(item.imageUrl || "");
     setItemAvailable(item.isAvailable);
     setFormError("");
     setShowEditModal(true);
@@ -155,6 +205,7 @@ export default function MenuManagementPage() {
         category: itemCategory.trim().toUpperCase(),
         price: Number(itemPrice),
         description: itemDescription.trim(),
+        imageUrl: itemImageUrl ? itemImageUrl.trim() : "",
         isAvailable: itemAvailable,
       });
 
@@ -184,6 +235,7 @@ export default function MenuManagementPage() {
         category: itemCategory.trim().toUpperCase(),
         price: Number(itemPrice),
         description: itemDescription.trim(),
+        imageUrl: itemImageUrl ? itemImageUrl.trim() : "",
         isAvailable: itemAvailable,
       });
 
@@ -441,17 +493,30 @@ export default function MenuManagementPage() {
                         key={item._id}
                         className="hover:bg-gray-50/70 transition"
                       >
-                        {/* Name & Description */}
+                        {/* Name & Description with Image */}
                         <td className="px-6 py-4">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-gray-900 text-sm">
-                              {item.name}
-                            </span>
-                            {item.description && (
-                              <span className="text-[11px] text-gray-400 mt-0.5 line-clamp-1">
-                                {item.description}
-                              </span>
+                          <div className="flex items-center gap-3">
+                            {item.imageUrl ? (
+                              <img
+                                src={item.imageUrl}
+                                alt={item.name}
+                                className="w-10 h-10 rounded-xl object-cover border border-gray-200 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400 shrink-0">
+                                <MdFastfood size={18} />
+                              </div>
                             )}
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900 text-sm">
+                                {item.name}
+                              </span>
+                              {item.description && (
+                                <span className="text-[11px] text-gray-400 mt-0.5 line-clamp-1">
+                                  {item.description}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
 
@@ -670,6 +735,62 @@ export default function MenuManagementPage() {
                   />
                 </div>
 
+                {/* Dish Photo / Image (Cloudflare R2) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Dish Photo (Cloudflare R2)
+                    </label>
+                    {itemImageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setItemImageUrl("")}
+                        className="text-[11px] font-bold text-red-600 hover:underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    <div className="w-14 h-14 rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                      {itemImageUrl ? (
+                        <img
+                          src={itemImageUrl}
+                          alt="Dish Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <MdFastfood size={24} className="text-gray-300" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#e02424] hover:bg-[#c81e1e] text-white rounded-lg text-xs font-bold cursor-pointer transition">
+                          <FiUploadCloud size={14} />
+                          <span>{uploadingImage ? "Uploading..." : itemImageUrl ? "Change Photo" : "Upload to R2"}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleItemImageUpload}
+                            disabled={uploadingImage}
+                            className="hidden"
+                          />
+                        </label>
+                        <span className="text-[10px] text-gray-400">Max 10MB</span>
+                      </div>
+                      <input
+                        type="url"
+                        placeholder="Or paste image URL directly..."
+                        value={itemImageUrl}
+                        onChange={(e) => setItemImageUrl(e.target.value)}
+                        className="w-full px-2.5 py-1 text-xs border border-gray-200 rounded-lg bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200">
                   <span className="text-xs font-bold text-gray-800">
                     Immediately Available (In Stock)
@@ -852,6 +973,62 @@ export default function MenuManagementPage() {
                     onChange={(e) => setItemDescription(e.target.value)}
                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
                   />
+                </div>
+
+                {/* Dish Photo / Image (Cloudflare R2) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Dish Photo (Cloudflare R2)
+                    </label>
+                    {itemImageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setItemImageUrl("")}
+                        className="text-[11px] font-bold text-red-600 hover:underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    <div className="w-14 h-14 rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                      {itemImageUrl ? (
+                        <img
+                          src={itemImageUrl}
+                          alt="Dish Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <MdFastfood size={24} className="text-gray-300" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#e02424] hover:bg-[#c81e1e] text-white rounded-lg text-xs font-bold cursor-pointer transition">
+                          <FiUploadCloud size={14} />
+                          <span>{uploadingImage ? "Uploading..." : itemImageUrl ? "Change Photo" : "Upload to R2"}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleItemImageUpload}
+                            disabled={uploadingImage}
+                            className="hidden"
+                          />
+                        </label>
+                        <span className="text-[10px] text-gray-400">Max 10MB</span>
+                      </div>
+                      <input
+                        type="url"
+                        placeholder="Or paste image URL directly..."
+                        value={itemImageUrl}
+                        onChange={(e) => setItemImageUrl(e.target.value)}
+                        className="w-full px-2.5 py-1 text-xs border border-gray-200 rounded-lg bg-white"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200">

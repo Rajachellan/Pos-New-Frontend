@@ -181,6 +181,19 @@ function OrderHistoryContent() {
     const printWindow = window.open("", "_blank", "width=600,height=700");
     if (!printWindow) return;
 
+    let settings = {
+      restaurantName: "TANJAVOOR RESTAURANT",
+      tagline: "Tax Invoice / Bill",
+      logoUrl: "",
+      phone: "",
+      address: "",
+      gstin: "",
+    };
+    try {
+      const saved = localStorage.getItem("pos_terminal_settings");
+      if (saved) settings = { ...settings, ...JSON.parse(saved) };
+    } catch (e) {}
+
     const itemsHtml = order.items
       .map(
         (item) => `
@@ -200,16 +213,23 @@ function OrderHistoryContent() {
           <title>Order Receipt ${orderNum}</title>
           <style>
             body { font-family: 'Courier New', Courier, monospace; padding: 20px; width: 300px; margin: auto; }
-            h2, h3 { text-align: center; margin: 5px 0; }
+            h2, h3 { text-align: center; margin: 4px 0; }
+            .logo-wrap { text-align: center; margin-bottom: 8px; }
+            .logo-wrap img { max-height: 55px; max-width: 130px; object-fit: contain; }
+            .sub-info { font-size: 11px; text-align: center; color: #555; margin: 2px 0; }
             .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
             table { width: 100%; border-collapse: collapse; font-size: 13px; }
             .total { font-weight: bold; font-size: 15px; margin-top: 10px; text-align: right; }
           </style>
         </head>
         <body>
-          <h2>TANJAVOOR RESTAURANT</h2>
+          ${settings.logoUrl ? `<div class="logo-wrap"><img src="${settings.logoUrl}" alt="Logo" /></div>` : ''}
+          <h2>${settings.restaurantName || 'TANJAVOOR RESTAURANT'}</h2>
           <h3>Tax Invoice / Bill</h3>
-          <p style="font-size: 12px; text-align: center;">Order: ${orderNum} | Table: #${order.tableId?.tableNumber || 'N/A'}<br/>Date: ${new Date(order.createdAt).toLocaleString()}</p>
+          ${settings.address ? `<p class="sub-info">${settings.address}</p>` : ''}
+          ${settings.phone ? `<p class="sub-info">Tel: ${settings.phone}</p>` : ''}
+          ${settings.gstin ? `<p class="sub-info">GSTIN: ${settings.gstin}</p>` : ''}
+          <p style="font-size: 11px; text-align: center; margin-top: 6px;">Order: ${orderNum} | Table: #${order.tableId?.tableNumber || 'N/A'}<br/>Date: ${new Date(order.createdAt).toLocaleString()}</p>
           <div class="divider"></div>
           <table>
             <thead>

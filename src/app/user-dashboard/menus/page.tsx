@@ -134,6 +134,49 @@ function MenusContent() {
     }, 120)
   }
 
+  // Terminal & Hotel Settings (Logo, Brand Name, Address, etc.)
+  const [terminalSettings, setTerminalSettings] = useState<{
+    restaurantName?: string;
+    tagline?: string;
+    logoUrl?: string;
+    phone?: string;
+    address?: string;
+    gstin?: string;
+    fssaiLicense?: string;
+    currencySymbol?: string;
+  }>({
+    restaurantName: "TANJAVOOR RESTAURANT",
+    tagline: "Fine Dining & POS System",
+    logoUrl: "",
+    currencySymbol: "₹",
+  });
+
+  useEffect(() => {
+    const saved = localStorage.getItem("pos_terminal_settings");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setTerminalSettings((prev) => ({ ...prev, ...parsed }));
+      } catch (e) {}
+    }
+
+    api.get("/organizations/profile")
+      .then((res) => {
+        if (res.data?.success && res.data.data?.organization) {
+          const org = res.data.data.organization;
+          setTerminalSettings((prev) => ({
+            ...prev,
+            restaurantName: org.name || prev.restaurantName,
+            logoUrl: org.logoUrl || prev.logoUrl,
+            phone: org.phno || prev.phone,
+            address: org.address || prev.address,
+            gstin: org.gstNumber || prev.gstin,
+          }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Auto redirect countdown to Tables page after successful payment
   useEffect(() => {
     if (redirectCountdown === null) return
@@ -1101,9 +1144,21 @@ function MenusContent() {
                 {/* Printable Receipt Preview */}
                 <div id="printable-receipt" className="font-mono text-xs space-y-3 text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <div className="text-center space-y-0.5 border-b border-dashed border-slate-300 pb-2">
-                    <p className="font-black text-sm uppercase">TANJAVOOR RESTAURANT</p>
-                    <p className="text-[10px] text-slate-500">Fine Dining & POS System</p>
-                    <p className="text-[10px] text-slate-500">{new Date().toLocaleString()}</p>
+                    {terminalSettings.logoUrl && (
+                      <div className="flex justify-center mb-1.5">
+                        <img
+                          src={terminalSettings.logoUrl}
+                          alt="Hotel Logo"
+                          className="max-h-14 max-w-[130px] object-contain mx-auto"
+                        />
+                      </div>
+                    )}
+                    <p className="font-black text-sm uppercase">{terminalSettings.restaurantName || "TANJAVOOR RESTAURANT"}</p>
+                    <p className="text-[10px] text-slate-500">{terminalSettings.tagline || "Fine Dining & POS System"}</p>
+                    {terminalSettings.address && <p className="text-[9px] text-slate-400 truncate">{terminalSettings.address}</p>}
+                    {terminalSettings.phone && <p className="text-[9px] text-slate-500">Tel: {terminalSettings.phone}</p>}
+                    {terminalSettings.gstin && <p className="text-[9px] font-bold text-slate-600">GSTIN: {terminalSettings.gstin}</p>}
+                    <p className="text-[10px] text-slate-500 pt-0.5">{new Date().toLocaleString()}</p>
                   </div>
 
                   <div className="flex justify-between text-[11px] font-bold">
