@@ -133,7 +133,7 @@ function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
         <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent" />
 
         {/* Navigation items */}
-        <nav className="flex flex-col gap-1 overflow-y-auto max-h-[calc(100vh-210px)] pr-1">
+        <nav className="flex flex-col gap-1 overflow-y-auto max-h-[calc(100vh-210px)] scrollbar-none pr-1">
           {visibleMenuItems.map((item) => {
             const Icon = item.icon
             const isActive = pathname === item.href
@@ -182,7 +182,7 @@ function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
   return (
     <>
       {/* Desktop Persistent Sidebar */}
-      <aside className="hidden lg:flex sticky top-0 h-screen w-64 flex-col justify-between border-r border-slate-800 bg-slate-900 p-5 text-slate-200 shadow-2xl z-30 flex-shrink-0">
+      <aside className="hidden lg:flex sticky top-0 h-screen w-64 flex-col justify-between border-r border-slate-800 bg-slate-900 p-5 text-slate-200 shadow-2xl z-30 flex-shrink-0 overflow-hidden">
         {renderSidebarContent(false)}
       </aside>
 
@@ -196,7 +196,7 @@ function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
           />
 
           {/* Drawer Panel */}
-          <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] flex flex-col justify-between bg-slate-900 p-5 text-slate-200 shadow-2xl z-50 animate-in slide-in-from-left duration-250">
+          <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] flex flex-col justify-between bg-slate-900 p-5 text-slate-200 shadow-2xl z-50 animate-in slide-in-from-left duration-250 overflow-hidden">
             {renderSidebarContent(true)}
           </aside>
         </div>

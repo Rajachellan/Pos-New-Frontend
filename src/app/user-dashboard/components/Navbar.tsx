@@ -200,7 +200,7 @@ export default function Navbar({ onToggleMobileMenu }: NavbarProps) {
         <button
           type="button"
           onClick={onToggleMobileMenu}
-          className="text-gray-700 hover:text-gray-900 p-2 rounded-xl hover:bg-gray-100 active:scale-95 transition cursor-pointer"
+          className="lg:hidden text-gray-700 hover:text-gray-900 p-2 rounded-xl hover:bg-gray-100 active:scale-95 transition cursor-pointer shrink-0"
           title="Toggle Navigation"
           aria-label="Toggle Navigation"
         >

@@ -79,24 +79,36 @@ export default function MenuManagementPage() {
     }
   };
 
+  const [categoryList, setCategoryList] = useState<{ _id: string; name: string }[]>([]);
+
+  const fetchCategories = async () => {
+    try {
+      const res = await api.get("/get/categories");
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        setCategoryList(res.data.data);
+      }
+    } catch (err) {
+      console.error("Failed to load categories", err);
+    }
+  };
+
+
   useEffect(() => {
     fetchMenuItems();
+    fetchCategories();
   }, []);
 
-  // Compute unique categories
+  // Compute unique categories dynamically without any hardcoding
   const categories = useMemo(() => {
     const cats = new Set<string>();
+    categoryList.forEach((c) => {
+      if (c.name) cats.add(c.name.toUpperCase().trim());
+    });
     menuItems.forEach((i) => {
       if (i.category) cats.add(i.category.toUpperCase().trim());
     });
-    // Default categories if empty
-    if (cats.size === 0) {
-      ["BIRIYANI", "DESSERT", "DRINKS", "ICE CREAM", "ROTIS", "BBQ"].forEach(
-        (c) => cats.add(c)
-      );
-    }
-    return Array.from(cats);
-  }, [menuItems]);
+    return Array.from(cats).sort((a, b) => a.localeCompare(b));
+  }, [categoryList, menuItems]);
 
   // Filtered menu items
   const filteredItems = useMemo(() => {
@@ -164,9 +176,9 @@ export default function MenuManagementPage() {
     const defaultCat =
       presetCategory && presetCategory !== "ALL"
         ? presetCategory.toUpperCase().trim()
-        : categories[0] ?? "BIRIYANI";
+        : categories[0] ?? "";
     setItemCategory(defaultCat);
-    setIsNewCategoryMode(false);
+    setIsNewCategoryMode(categories.length === 0 || !defaultCat);
     setItemPrice("");
     setItemDescription("");
     setItemImageUrl("");
@@ -213,6 +225,7 @@ export default function MenuManagementPage() {
         setShowAddModal(false);
         showToast(`"${itemName.trim()}" added to menu successfully!`);
         await fetchMenuItems();
+        await fetchCategories();
       }
     } catch (err) {
       const error = err as AxiosError<{ message?: string }>;
@@ -243,6 +256,7 @@ export default function MenuManagementPage() {
         setShowEditModal(false);
         showToast(`"${itemName.trim()}" updated successfully!`);
         await fetchMenuItems();
+        await fetchCategories();
       }
     } catch (err) {
       const error = err as AxiosError<{ message?: string }>;
@@ -288,14 +302,63 @@ export default function MenuManagementPage() {
     }
   };
 
-  // Add Category Helper
-  const handleAddCategory = (e: React.FormEvent) => {
+  // Add Category Handler (persists to backend)
+  const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
     const cat = newCategoryName.trim().toUpperCase();
-    openAddModal(cat);
-    setShowCategoryModal(false);
-    setNewCategoryName("");
+    try {
+      setIsSubmitting(true);
+      const res = await api.post("/add/category", { name: cat });
+      if (res.data?.success) {
+        showToast(`Category "${cat}" created successfully!`);
+        await fetchCategories();
+        setSelectedCategory(cat);
+        setShowCategoryModal(false);
+        setNewCategoryName("");
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to create category");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddCategoryAndOpenDish = async () => {
+    if (!newCategoryName.trim()) return;
+    const cat = newCategoryName.trim().toUpperCase();
+    try {
+      setIsSubmitting(true);
+      const res = await api.post("/add/category", { name: cat });
+      if (res.data?.success) {
+        showToast(`Category "${cat}" created.`);
+        await fetchCategories();
+        setSelectedCategory(cat);
+        setShowCategoryModal(false);
+        setNewCategoryName("");
+        openAddModal(cat);
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to create category");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteCategory = async (catName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to delete category "${catName}"?`)) return;
+    try {
+      const res = await api.delete(`/category/${encodeURIComponent(catName)}`);
+      if (res.data?.success) {
+        showToast(`Category "${catName}" removed.`);
+        if (selectedCategory === catName) setSelectedCategory("ALL");
+        await fetchCategories();
+        await fetchMenuItems();
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to remove category");
+    }
   };
 
   return (
@@ -381,35 +444,59 @@ export default function MenuManagementPage() {
                 </span>
               </button>
 
-              {categories.map((cat) => {
-                const count = menuItems.filter(
-                  (i) => i.category.toUpperCase().trim() === cat
-                ).length;
-                const isSelected = selectedCategory === cat;
+              {categories.length === 0 ? (
+                <div className="text-center py-6 px-3 bg-gray-50/70 rounded-xl border border-dashed border-gray-200 mt-2">
+                  <FiTag className="mx-auto text-gray-300 mb-1.5" size={20} />
+                  <p className="text-xs font-semibold text-gray-600">No categories yet</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Click + New Category to add categories for your menu.</p>
+                </div>
+              ) : (
+                categories.map((cat) => {
+                  const count = menuItems.filter(
+                    (i) => i.category.toUpperCase().trim() === cat
+                  ).length;
+                  const isSelected = selectedCategory === cat;
 
-                return (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
-                      isSelected
-                        ? "bg-[#e02424] text-white shadow-xs"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                  >
-                    <span className="truncate">{cat}</span>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  return (
+                    <div
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`group w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                         isSelected
-                          ? "bg-white/20 text-white"
-                          : "bg-gray-100 text-gray-600"
+                          ? "bg-[#e02424] text-white shadow-xs"
+                          : "text-gray-700 hover:bg-gray-100"
                       }`}
                     >
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
+                      <span className="truncate">{cat}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            isSelected
+                              ? "bg-white/20 text-white"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {count}
+                        </span>
+                        {count === 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteCategory(cat, e)}
+                            className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition ${
+                              isSelected
+                                ? "hover:bg-white/20 text-white"
+                                : "hover:bg-red-50 text-red-500"
+                            }`}
+                            title="Delete Unused Category"
+                          >
+                            <FiTrash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -636,28 +723,30 @@ export default function MenuManagementPage() {
                       <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
                         Category
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsNewCategoryMode(!isNewCategoryMode);
-                          if (!isNewCategoryMode) {
-                            setItemCategory("");
-                          } else {
-                            setItemCategory(categories[0] || "BIRIYANI");
-                          }
-                        }}
-                        className="text-[11px] font-bold text-[#e02424] hover:underline cursor-pointer"
-                      >
-                        {isNewCategoryMode ? "← Choose Existing" : "+ New Category"}
-                      </button>
+                      {categories.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsNewCategoryMode(!isNewCategoryMode);
+                            if (!isNewCategoryMode) {
+                              setItemCategory("");
+                            } else {
+                              setItemCategory(categories[0] || "");
+                            }
+                          }}
+                          className="text-[11px] font-bold text-[#e02424] hover:underline cursor-pointer"
+                        >
+                          {isNewCategoryMode ? "← Choose Existing" : "+ New Category"}
+                        </button>
+                      )}
                     </div>
 
-                    {isNewCategoryMode ? (
+                    {isNewCategoryMode || categories.length === 0 ? (
                       <input
                         type="text"
                         required
                         autoFocus
-                        placeholder="Type new category..."
+                        placeholder={categories.length === 0 ? "e.g. STARTERS, MEALS, DRINKS" : "Type new category..."}
                         value={itemCategory}
                         onChange={(e) => setItemCategory(e.target.value.toUpperCase())}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
@@ -676,6 +765,7 @@ export default function MenuManagementPage() {
                         }}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424] cursor-pointer"
                       >
+                        <option value="" disabled>-- Select Category --</option>
                         {categories.map((cat) => (
                           <option key={cat} value={cat}>
                             {cat}
@@ -878,23 +968,25 @@ export default function MenuManagementPage() {
                       <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
                         Category
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsNewCategoryMode(!isNewCategoryMode);
-                          if (!isNewCategoryMode) {
-                            setItemCategory("");
-                          } else {
-                            setItemCategory(editingItem?.category || categories[0] || "BIRIYANI");
-                          }
-                        }}
-                        className="text-[11px] font-bold text-[#e02424] hover:underline cursor-pointer"
-                      >
-                        {isNewCategoryMode ? "← Choose Existing" : "+ New Category"}
-                      </button>
+                      {categories.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsNewCategoryMode(!isNewCategoryMode);
+                            if (!isNewCategoryMode) {
+                              setItemCategory("");
+                            } else {
+                              setItemCategory(editingItem?.category || categories[0] || "");
+                            }
+                          }}
+                          className="text-[11px] font-bold text-[#e02424] hover:underline cursor-pointer"
+                        >
+                          {isNewCategoryMode ? "← Choose Existing" : "+ New Category"}
+                        </button>
+                      )}
                     </div>
 
-                    {isNewCategoryMode ? (
+                    {isNewCategoryMode || categories.length === 0 ? (
                       <input
                         type="text"
                         required
@@ -1100,26 +1192,36 @@ export default function MenuManagementPage() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. STARTERS, SOUPS, SEAFOOD"
+                    autoFocus
+                    placeholder="e.g. STARTERS, SOUPS, BEVERAGES"
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value.toUpperCase())}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-3 pt-2">
+                <div className="flex items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setShowCategoryModal(false)}
-                    className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition"
+                    className="px-3.5 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-[#e02424] text-white rounded-xl text-xs font-bold hover:bg-red-700 transition shadow-xs"
+                    disabled={isSubmitting || !newCategoryName.trim()}
+                    className="px-4 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
                   >
-                    Continue to Add Dish
+                    Save Category
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddCategoryAndOpenDish}
+                    disabled={isSubmitting || !newCategoryName.trim()}
+                    className="px-4 py-2 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    Save & Add Dish
                   </button>
                 </div>
               </form>

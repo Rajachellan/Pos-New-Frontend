@@ -7,6 +7,7 @@ import { getSocket } from '../services/socket'
 import { AxiosError } from 'axios'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
+import { sortTablesNaturally } from '../utils/tableSort'
 import {
   FiRefreshCw,
   FiGrid,
@@ -32,7 +33,8 @@ import {
   RiTableLine,
   RiFireLine,
   RiShieldUserLine,
-  RiStore2Line
+  RiStore2Line,
+  RiTakeawayLine
 } from 'react-icons/ri'
 import { MdMeetingRoom, MdOutlineRestaurantMenu } from 'react-icons/md'
 import { FaUtensils, FaReceipt, FaCircleCheck } from 'react-icons/fa6'
@@ -133,7 +135,7 @@ export default function UserDashboardPage() {
       ])
 
       if (tablesRes.status === 'fulfilled' && Array.isArray(tablesRes.value?.data?.data)) {
-        setTables(tablesRes.value.data.data)
+        setTables(sortTablesNaturally(tablesRes.value.data.data))
       }
 
       if (areasRes.status === 'fulfilled' && Array.isArray(areasRes.value?.data?.data)) {
@@ -219,10 +221,12 @@ export default function UserDashboardPage() {
   const occupancyRate = totalTablesCount > 0 ? Math.round((occupiedTablesCount / totalTablesCount) * 100) : 0
   const activeKitchenCount = kitchenOrders.filter((o) => o.orderStatus !== 'SERVED').length
 
-  // Filtered tables for snapshot
+  // Filtered tables for snapshot (naturally ordered: 1, 2, 3 ... 9, 10, 11, 12, 13)
   const filteredTables = useMemo(() => {
-    if (selectedArea === 'ALL') return tables
-    return tables.filter((t) => t.areaName?._id === selectedArea || t.areaName?.areaName === selectedArea)
+    const list = selectedArea === 'ALL'
+      ? tables
+      : tables.filter((t) => t.areaName?._id === selectedArea || t.areaName?.areaName === selectedArea)
+    return sortTablesNaturally(list)
   }, [tables, selectedArea])
 
   const quickNavCards = [
@@ -236,6 +240,17 @@ export default function UserDashboardPage() {
       badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
       gradient: 'from-amber-500 to-red-600',
       shadowColor: 'hover:shadow-red-500/20'
+    },
+    {
+      title: 'Takeaway & Parcel',
+      subtitle: 'Counter orders & pickup',
+      description: 'Punch parcel tickets, track kitchen packaging, and manage counter pickups.',
+      href: '/user-dashboard/takeaway',
+      icon: RiTakeawayLine,
+      badgeText: 'Parcel Counter',
+      badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
+      gradient: 'from-amber-600 to-orange-600',
+      shadowColor: 'hover:shadow-amber-500/20'
     },
     {
       title: 'Kitchen Display (KDS)',
@@ -560,6 +575,14 @@ export default function UserDashboardPage() {
                 {area.areaName}
               </button>
             ))}
+
+            <Link
+              href="/user-dashboard/takeaway"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300"
+            >
+              <RiTakeawayLine size={14} className="text-amber-600" />
+              <span>Takeaway Counter</span>
+            </Link>
           </div>
         </div>
 

@@ -20,6 +20,7 @@ import {
   FiZap,
 } from "react-icons/fi";
 import { MdOutlineTableRestaurant } from "react-icons/md";
+import { sortTablesNaturally } from "../../utils/tableSort";
 
 interface AreaData {
   _id: string;
@@ -160,7 +161,7 @@ export default function FloorsAndTablesPage() {
         }
       }
 
-      setTables(data);
+      setTables(sortTablesNaturally(data));
     } catch (err) {
       console.error("Error fetching tables", err);
     }
@@ -231,12 +232,8 @@ export default function FloorsAndTablesPage() {
         return aId === area._id;
       });
 
-      // Sort tables naturally (T1, T2, T3...)
-      const sortedTables = [...areaTables].sort((a, b) => {
-        const numA = parseInt(a.tableNumber.replace(/\D/g, "")) || 0;
-        const numB = parseInt(b.tableNumber.replace(/\D/g, "")) || 0;
-        return numA - numB;
-      });
+      // Sort tables naturally (T1, T2, T3... T10, T11)
+      const sortedTables = sortTablesNaturally(areaTables);
 
       return {
         area,

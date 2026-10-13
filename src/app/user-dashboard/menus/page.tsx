@@ -20,6 +20,8 @@ import {
   FiClock,
 } from "react-icons/fi"
 import { RiFireLine } from "react-icons/ri"
+import { sortTablesNaturally } from '../../utils/tableSort'
+import { getActiveBranchReceiptInfo, BranchReceiptInfo } from '../../utils/receiptBranding'
 
 interface MenuItem {
   _id: string
@@ -91,6 +93,7 @@ function MenusContent() {
 
   const [search, setSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("all")
+  const [dietFilter, setDietFilter] = useState<"all" | "veg" | "non_veg">("all")
   const [loading, setLoading] = useState(true)
 
   // Modals
@@ -151,30 +154,29 @@ function MenusContent() {
     currencySymbol: "₹",
   });
 
-  useEffect(() => {
-    const saved = localStorage.getItem("pos_terminal_settings");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setTerminalSettings((prev) => ({ ...prev, ...parsed }));
-      } catch (e) {}
-    }
+  const [branchReceiptInfo, setBranchReceiptInfo] = useState<BranchReceiptInfo | null>(null);
 
-    api.get("/organizations/profile")
-      .then((res) => {
-        if (res.data?.success && res.data.data?.organization) {
-          const org = res.data.data.organization;
+  useEffect(() => {
+    function loadBranding() {
+      getActiveBranchReceiptInfo().then((info) => {
+        setBranchReceiptInfo(info);
+        if (info) {
           setTerminalSettings((prev) => ({
             ...prev,
-            restaurantName: org.name || prev.restaurantName,
-            logoUrl: org.logoUrl || prev.logoUrl,
-            phone: org.phno || prev.phone,
-            address: org.address || prev.address,
-            gstin: org.gstNumber || prev.gstin,
+            restaurantName: info.branchName || info.orgName || prev.restaurantName,
+            logoUrl: info.logoUrl || prev.logoUrl,
+            phone: info.phone || prev.phone,
+            address: info.address || prev.address,
+            gstin: info.gstin || prev.gstin,
+            tagline: info.tagline || prev.tagline,
           }));
         }
-      })
-      .catch(() => {});
+      });
+    }
+
+    loadBranding();
+    window.addEventListener("pos_branch_changed", loadBranding);
+    return () => window.removeEventListener("pos_branch_changed", loadBranding);
   }, []);
 
   // Auto redirect countdown to Tables page after successful payment
@@ -209,7 +211,7 @@ function MenusContent() {
       const savedBranchId = typeof window !== 'undefined' ? localStorage.getItem('pos_selected_branch') : null
       const branchQuery = savedBranchId && savedBranchId !== 'ALL' ? `?branchId=${savedBranchId}` : ''
       const res = await api.get(`/get/tables/branch${branchQuery}`)
-      const list = Array.isArray(res?.data?.data) ? res.data.data : []
+      const list: TableInfo[] = Array.isArray(res?.data?.data) ? sortTablesNaturally<TableInfo>(res.data.data) : []
       setAllTables(list)
       if (tableId) {
         const found = list.find((t: TableInfo) => t._id === tableId)
@@ -289,9 +291,35 @@ function MenusContent() {
     return Array.from(set)
   }, [menuItems])
 
+  // Helper to detect if a dish is Vegetarian or Non-Vegetarian
+  function isDishVeg(item: MenuItem): boolean {
+    if (item.foodType) {
+      const ft = item.foodType.toUpperCase()
+      if (ft === "VEG" || ft === "VEGETARIAN") return true
+      if (ft === "NON_VEG" || ft === "NON-VEG" || ft === "NONVEG") return false
+    }
+    const text = `${item.name || ""} ${item.category || ""}`.toLowerCase()
+    const nonVegKeywords = [
+      "chicken", "mutton", "fish", "prawn", "egg", "non veg", "non-veg", "nonveg",
+      "meat", "crab", "keema", "pork", "beef", "lamb", "duck", "liver", "boti", "spl meals"
+    ]
+    if (nonVegKeywords.some((kw) => text.includes(kw))) {
+      return false
+    }
+    return true
+  }
+
+  // Total counts for Veg & Non-Veg
+  const totalVegCount = useMemo(() => menuItems.filter((m) => isDishVeg(m)).length, [menuItems])
+  const totalNonVegCount = useMemo(() => menuItems.filter((m) => !isDishVeg(m)).length, [menuItems])
+
   // Filtered Menu Items
   const filteredMenuItems = useMemo(() => {
     return menuItems.filter((item) => {
+      const isVeg = isDishVeg(item)
+      if (dietFilter === "veg" && !isVeg) return false
+      if (dietFilter === "non_veg" && isVeg) return false
+
       const matchesCategory =
         selectedCategory === "all" ||
         item.category?.toLowerCase() === selectedCategory.toLowerCase()
@@ -301,7 +329,11 @@ function MenusContent() {
         item.category?.toLowerCase().includes(search.toLowerCase())
       return matchesCategory && matchesSearch
     })
-  }, [menuItems, selectedCategory, search])
+  }, [menuItems, selectedCategory, search, dietFilter])
+
+  // Partitioned lists for clean separate sections
+  const vegDishes = useMemo(() => filteredMenuItems.filter((m) => isDishVeg(m)), [filteredMenuItems])
+  const nonVegDishes = useMemo(() => filteredMenuItems.filter((m) => !isDishVeg(m)), [filteredMenuItems])
 
   // Add Item to Order
   async function handleAddItem(menuItem: MenuItem) {
@@ -547,37 +579,87 @@ function MenusContent() {
             />
           </div>
 
-          {/* Categories Pills */}
-          <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-none">
-            <button
-              onClick={() => setSelectedCategory("all")}
-              className={`px-4 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
-                selectedCategory === "all"
-                  ? "bg-slate-900 text-white shadow-md scale-105"
-                  : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
-              }`}
-            >
-              All
-            </button>
-
-            {categories.map((cat) => (
+          {/* Filters Row: Diet Filter (Veg / Non-Veg) + Category Pills */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+            {/* Diet Segmented Switch */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80 shrink-0">
               <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat.toLowerCase())}
-                className={`px-4 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
-                  selectedCategory === cat.toLowerCase()
-                    ? "bg-slate-900 text-white shadow-md scale-105"
-                    : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                type="button"
+                onClick={() => setDietFilter("all")}
+                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  dietFilter === "all"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                {cat}
+                All ({menuItems.length})
               </button>
-            ))}
+
+              <button
+                type="button"
+                onClick={() => setDietFilter("veg")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  dietFilter === "veg"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-emerald-700 hover:bg-emerald-50/80"
+                }`}
+              >
+                <span className="w-3 h-3 rounded-xs border-2 border-current flex items-center justify-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                </span>
+                <span>Veg ({totalVegCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDietFilter("non_veg")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  dietFilter === "non_veg"
+                    ? "bg-rose-700 text-white shadow-xs"
+                    : "text-rose-700 hover:bg-rose-50/80"
+                }`}
+              >
+                <span className="w-3 h-3 rounded-xs border-2 border-current flex items-center justify-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                </span>
+                <span>Non-Veg ({totalNonVegCount})</span>
+              </button>
+            </div>
+
+            <div className="h-5 w-px bg-slate-200 hidden sm:block shrink-0" />
+
+            {/* Categories Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none flex-1">
+              <button
+                onClick={() => setSelectedCategory("all")}
+                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+                  selectedCategory === "all"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/60"
+                }`}
+              >
+                All
+              </button>
+
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat.toLowerCase())}
+                  className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+                    selectedCategory === cat.toLowerCase()
+                      ? "bg-slate-900 text-white shadow-xs"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/60"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Menu Items Grid (Exact Petpooja Screenshot 3 Cards) */}
-        <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50">
+        {/* Menu Items Grid with Separate Veg & Non-Veg Sections */}
+        <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 space-y-6">
           {loading ? (
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -587,55 +669,148 @@ function MenusContent() {
           ) : filteredMenuItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-slate-400">
               <p className="font-bold tracking-tight">No menu items found</p>
-              <p className="text-sm mt-1">Try searching for a different item or select another category</p>
+              <p className="text-sm mt-1">Try searching for a different item or select another category/diet filter</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredMenuItems.map((item) => (
-                <div
-                  key={item._id}
-                  onClick={() => handleAddItem(item)}
-                  className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-[#e02424] hover:ring-2 hover:ring-red-100 transition-all cursor-pointer flex flex-col justify-between group h-36 relative overflow-hidden"
-                >
-                  <div>
-                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">
-                      {item.category || "Special"}
-                    </span>
-                    <h3 className="text-sm font-bold text-slate-900 group-hover:text-[#e02424] transition-colors leading-snug line-clamp-2">
-                      {item.name}
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-lg font-black text-slate-900 tracking-tighter">
-                      ₹{Number(item.price).toFixed(2)}
-                    </span>
-                    <div className="bg-red-50 p-1.5 rounded-lg text-[#e02424] group-hover:bg-[#e02424] group-hover:text-white transition-all shadow-xs">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M5 12h14"/><path d="M12 5v14"/>
-                      </svg>
+            <>
+              {/* 🟢 VEGETARIAN DISHES SECTION */}
+              {(dietFilter === "all" || dietFilter === "veg") && vegDishes.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-emerald-200/80">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-sm border-2 border-emerald-600 flex items-center justify-center bg-white shadow-2xs">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+                      </span>
+                      <h3 className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wider">
+                        Vegetarian Dishes
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {vegDishes.length} items
+                      </span>
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {vegDishes.map((item) => (
+                      <div
+                        key={item._id}
+                        onClick={() => handleAddItem(item)}
+                        className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-emerald-500 hover:ring-2 hover:ring-emerald-100 transition-all cursor-pointer flex flex-col justify-between group h-36 relative overflow-hidden"
+                      >
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="w-3.5 h-3.5 rounded-xs border-2 border-emerald-600 flex items-center justify-center bg-white shrink-0" title="Pure Veg">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                            </span>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 truncate">
+                              {item.category || "Special"}
+                            </span>
+                            <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-emerald-50 text-emerald-700">
+                              Veg
+                            </span>
+                          </div>
+                          <h3 className="text-sm font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-snug line-clamp-2">
+                            {item.name}
+                          </h3>
+                        </div>
+
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-lg font-black text-slate-900 tracking-tighter">
+                            ₹{Number(item.price).toFixed(2)}
+                          </span>
+                          <div className="bg-emerald-50 p-1.5 rounded-lg text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-xs">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M5 12h14"/><path d="M12 5v14"/>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+              )}
+
+              {/* 🔴 NON-VEGETARIAN DISHES SECTION */}
+              {(dietFilter === "all" || dietFilter === "non_veg") && nonVegDishes.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-rose-200/80">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-sm border-2 border-rose-700 flex items-center justify-center bg-white shadow-2xs">
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-700" />
+                      </span>
+                      <h3 className="text-xs sm:text-sm font-black text-rose-950 uppercase tracking-wider">
+                        Non-Vegetarian Dishes
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                        {nonVegDishes.length} items
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {nonVegDishes.map((item) => (
+                      <div
+                        key={item._id}
+                        onClick={() => handleAddItem(item)}
+                        className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-[#e02424] hover:ring-2 hover:ring-red-100 transition-all cursor-pointer flex flex-col justify-between group h-36 relative overflow-hidden"
+                      >
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="w-3.5 h-3.5 rounded-xs border-2 border-rose-700 flex items-center justify-center bg-white shrink-0" title="Non-Veg">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-700" />
+                            </span>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 truncate">
+                              {item.category || "Special"}
+                            </span>
+                            <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-rose-50 text-rose-700">
+                              Non-Veg
+                            </span>
+                          </div>
+                          <h3 className="text-sm font-bold text-slate-900 group-hover:text-[#e02424] transition-colors leading-snug line-clamp-2">
+                            {item.name}
+                          </h3>
+                        </div>
+
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-lg font-black text-slate-900 tracking-tighter">
+                            ₹{Number(item.price).toFixed(2)}
+                          </span>
+                          <div className="bg-red-50 p-1.5 rounded-lg text-[#e02424] group-hover:bg-[#e02424] group-hover:text-white transition-all shadow-xs">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M5 12h14"/><path d="M12 5v14"/>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
       </div>
 
-      {/* 2. RIGHT COLUMN: CURRENT ORDER PANEL (EXACT PETPOOJA SCREENSHOT 3) */}
-      <div className="w-full md:w-[420px] lg:w-[460px] flex flex-col bg-white border-l border-slate-200 h-full shadow-2xl md:shadow-none shrink-0">
+      {/* 2. RIGHT COLUMN: CURRENT ORDER PANEL */}
+      <div className="w-full md:w-[420px] lg:w-[460px] flex flex-col bg-white border-l border-slate-200 h-full shadow-2xl md:shadow-none shrink-0 min-h-0">
         
         {/* Table Header */}
-        <div className="p-4 bg-white border-b border-slate-100 flex items-center justify-between sticky top-0 z-20">
+        <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shrink-0 z-20">
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 bg-[#e02424] rounded-2xl flex items-center justify-center text-white shadow-lg shadow-red-200">
-              <span className="text-xl font-black">{tableDisplayNum}</span>
+            <div className="w-10 h-10 bg-[#e02424] rounded-xl flex items-center justify-center text-white shadow-md shadow-red-200">
+              <span className="text-base font-black">{tableDisplayNum}</span>
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-900 tracking-tight leading-tight">Order Details</h2>
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black text-slate-900 tracking-tight leading-tight">Order Details</h2>
+                {cart.items.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-50 text-[#e02424] border border-red-100">
+                    {cart.items.reduce((acc, i) => acc + (i.quantity || 1), 0)} items
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 {areaDisplayName}
               </span>
             </div>
@@ -654,20 +829,20 @@ function MenusContent() {
             )}
             <button
               onClick={() => navigateToTables()}
-              className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-700 group cursor-pointer"
+              className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 hover:text-slate-700 group cursor-pointer"
               title="Back to Floors & Tables"
             >
-              <FiX size={20} className="group-hover:rotate-90 transition-transform" />
+              <FiX size={18} className="group-hover:rotate-90 transition-transform" />
             </button>
           </div>
         </div>
 
-        {/* Order Items List */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-200">
+        {/* Order Items List - High Visibility Compact POS Rows */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-50">
           {cart.items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-72 text-slate-400 p-6 text-center">
-              <div className="bg-slate-50 p-6 rounded-full mb-3 text-slate-400">
-                <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 p-6 text-center">
+              <div className="bg-slate-50 p-5 rounded-full mb-3 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
                   <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
                 </svg>
@@ -679,7 +854,7 @@ function MenusContent() {
               <button
                 type="button"
                 onClick={() => navigateToTables()}
-                className="mt-4 px-4 py-2.5 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95"
+                className="mt-4 px-4 py-2 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95"
               >
                 <FiArrowLeft size={13} /> Return to Floors & Tables
               </button>
@@ -693,60 +868,70 @@ function MenusContent() {
               return (
                 <div
                   key={itemId}
-                  className={`bg-white p-4 rounded-xl border border-slate-100 shadow-xs flex items-center justify-between transition-all ${
-                    isOrdered ? "opacity-90 grayscale-[0.2]" : "hover:border-red-100 hover:shadow-md"
+                  className={`py-2 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2.5 ${
+                    isOrdered
+                      ? "bg-slate-50/80 border-slate-200/80 opacity-90"
+                      : "bg-white border-slate-200/70 hover:border-red-200 hover:shadow-xs"
                   }`}
                 >
-                  <div className="flex-1 mr-2">
-                    <h4 className="font-bold text-slate-900 leading-tight text-sm">{item.name}</h4>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs font-black text-[#e02424] uppercase tracking-widest">
+                  {/* Left: Item name and unit price & tags */}
+                  <div className="flex-1 min-w-0 pr-1">
+                    <h4 className="font-bold text-slate-900 text-xs sm:text-[13px] leading-snug truncate" title={item.name}>
+                      {item.name}
+                    </h4>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11px] font-bold text-slate-500">
                         ₹{Number(item.price).toFixed(2)}
                       </span>
                       {item.isManual && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600 border border-amber-100 uppercase tracking-tight">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
                           Manual
                         </span>
                       )}
                       {isOrdered && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase tracking-tight">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
                           {item.kitchenStatus}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-3">
+                  {/* Right: Stepper, Item Total, and Remove */}
+                  <div className="flex items-center gap-2 shrink-0">
                     {/* Stepper */}
-                    <div className="flex items-center bg-slate-50 rounded-xl p-1 border border-slate-100">
+                    <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200/80">
                       <button
                         type="button"
                         onClick={() => handleUpdateQuantity(itemId, 'decrease')}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white hover:shadow-xs text-slate-600 transition-all active:scale-90 cursor-pointer"
+                        className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
+                        title="Decrease"
                       >
-                        <FiMinus size={13} />
+                        <FiMinus size={11} />
                       </button>
-                      <span className="w-7 text-center font-bold text-slate-900 text-xs">{item.quantity}</span>
+                      <span className="w-5 text-center font-black text-slate-900 text-xs">{item.quantity}</span>
                       <button
                         type="button"
                         onClick={() => handleUpdateQuantity(itemId, 'increase')}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white hover:shadow-xs text-slate-600 transition-all active:scale-90 cursor-pointer"
+                        className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
+                        title="Increase"
                       >
-                        <FiPlus size={13} />
+                        <FiPlus size={11} />
                       </button>
                     </div>
 
-                    <div className="w-16 text-right">
-                      <span className="font-black text-slate-900 text-sm">₹{itemTotal}</span>
+                    {/* Total for item */}
+                    <div className="w-14 text-right">
+                      <span className="font-bold text-slate-900 text-xs sm:text-[13px]">₹{itemTotal}</span>
                     </div>
 
+                    {/* Delete */}
                     <button
                       type="button"
                       onClick={() => handleDeleteItem(item)}
                       className="text-slate-300 hover:text-red-500 transition-colors p-1 active:scale-90 cursor-pointer"
                       title="Remove Item"
                     >
-                      <FiTrash2 size={16} />
+                      <FiTrash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -755,145 +940,123 @@ function MenusContent() {
           )}
         </div>
 
-        {/* Billing Section (Exact Petpooja Screenshot 3 Partial) */}
-        <div className="border-t border-slate-200 bg-slate-50 p-4 sticky bottom-0 z-10">
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-            
-            {/* Subtotal */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-slate-400 tracking-widest">Subtotal</span>
-                <span className="text-xl font-black text-slate-900 tracking-tighter">
-                  ₹{(cart.subtotal || 0).toFixed(2)}
-                </span>
-              </div>
-
-              <div className="h-px bg-slate-100" />
-
-              {/* GST 5% Toggle Switch */}
-              <div className="flex flex-col space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-col">
-                    <span className="text-[11px] font-black uppercase text-slate-900 tracking-widest">Apply GST (5%)</span>
-                    <span className="text-[9px] font-bold text-slate-400">Government Regulation</span>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={cart.gstEnabled}
-                      onChange={handleToggleGst}
-                      className="sr-only peer"
-                    />
-                    <div className="w-12 h-6 bg-slate-200 rounded-full peer peer-checked:bg-[#e02424] transition-all after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-6 shadow-inner" />
-                  </label>
-                </div>
-
-                {cart.gstEnabled && (
-                  <div className="flex items-center justify-between text-slate-500 bg-slate-50 p-2 rounded-xl border border-slate-100 text-xs">
-                    <span className="text-[10px] font-black uppercase tracking-widest">Calculated Tax</span>
-                    <span className="text-xs font-black text-slate-900">₹{(cart.gstAmount || 0).toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between text-slate-500 text-xs">
-                <span className="text-[11px] font-black uppercase tracking-widest">Service Charge</span>
-                <span className="text-xs font-black text-slate-900">₹{(cart.serviceCharge || 0).toFixed(2)}</span>
-              </div>
+        {/* Billing Section (Streamlined & Compact POS Footer) */}
+        <div className="border-t border-slate-200 bg-white px-4 py-3 shrink-0 shadow-lg space-y-2 z-10">
+          {/* Subtotal & Taxes breakdown */}
+          <div className="space-y-1.5 text-xs">
+            <div className="flex items-center justify-between text-slate-600">
+              <span className="font-bold text-[11px] uppercase tracking-wider text-slate-400">Subtotal</span>
+              <span className="font-black text-slate-900 text-sm">
+                ₹{(cart.subtotal || 0).toFixed(2)}
+              </span>
             </div>
 
-            {/* Total Amount Payable */}
-            <div className="pt-4 border-t-2 border-dashed border-slate-200">
-              <div className="flex flex-col space-y-1">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                  Total Amount Payable
-                </span>
-                <div className="flex items-center justify-center">
-                  <span className="text-4xl font-black text-[#e02424] tracking-tighter">
-                    ₹{(cart.totalAmount || 0).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Live Kitchen Status Banner (if order is active in kitchen) */}
-            {cart.status && cart.status !== "PENDING" && cart.status !== "COMPLETED" && cart.items.length > 0 && (
-              <div className="rounded-2xl p-3.5 bg-slate-900 text-white flex items-center justify-between shadow-md">
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className={`w-2.5 h-2.5 rounded-full ${
-                      cart.status === "READY"
-                        ? "bg-emerald-400 animate-bounce"
-                        : cart.status === "PREPARING"
-                        ? "bg-amber-400 animate-pulse"
-                        : "bg-red-400 animate-ping"
-                    }`}
+            {/* GST 5% Toggle Switch inline */}
+            <div className="flex items-center justify-between py-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Apply GST (5%)</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={cart.gstEnabled}
+                    onChange={handleToggleGst}
+                    className="sr-only peer"
                   />
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                      Kitchen Progress
-                    </p>
-                    <p className="text-xs font-bold text-slate-100">
-                      {cart.status === "READY"
-                        ? "Ready to Serve!"
-                        : cart.status === "PREPARING"
-                        ? "Cooking in Kitchen (In Prep)"
-                        : "Order in Kitchen Queue"}
-                    </p>
-                  </div>
-                </div>
-
-                <Link
-                  href="/user-dashboard/kitchen"
-                  className="rounded-xl bg-white/10 hover:bg-white/20 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-white transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span>Open KDS</span>
-                  <FiArrowRight size={12} />
-                </Link>
+                  <div className="w-8 h-4 bg-slate-200 rounded-full peer peer-checked:bg-[#e02424] transition-all after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-4 shadow-inner" />
+                </label>
               </div>
-            )}
-
-            {/* Actions: KOT / BILL / PAY */}
-            <div className="space-y-2 pt-1">
-              {hasPendingItems ? (
-                <button
-                  type="button"
-                  onClick={handleSendKot}
-                  disabled={cart.items.length === 0 || sendingKot || cart.status === "COMPLETED"}
-                  className="w-full bg-[#e02424] hover:bg-red-700 text-white py-3.5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl shadow-red-200 active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-40"
-                >
-                  <RiFireLine className="mr-2 text-base animate-pulse" />
-                  {sendingKot
-                    ? "Sending to Kitchen..."
-                    : cart.status === "ORDERED" || cart.status === "PREPARING" || cart.status === "READY"
-                    ? "Send New Items to Kitchen (KOT) ➔"
-                    : "Order & Send to Kitchen (KOT) ➔"}
-                </button>
-              ) : null}
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowBillModal(true)}
-                  disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-900 py-3.5 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all flex items-center justify-center cursor-pointer disabled:opacity-40"
-                >
-                  <FiPrinter className="mr-2 text-sm" />
-                  Bill
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentModal(true)}
-                  disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl shadow-emerald-600/20 active:scale-95 disabled:opacity-40 flex items-center justify-center cursor-pointer"
-                >
-                  <FiCheckCircle className="mr-2 text-sm" />
-                  Pay
-                </button>
-              </div>
+              <span className="font-bold text-slate-700 text-xs">
+                {cart.gstEnabled ? `₹${(cart.gstAmount || 0).toFixed(2)}` : "₹0.00"}
+              </span>
             </div>
 
+            <div className="flex items-center justify-between text-slate-500 text-xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Service Charge</span>
+              <span className="font-bold text-slate-800">₹{(cart.serviceCharge || 0).toFixed(2)}</span>
+            </div>
+          </div>
+
+          {/* Total Amount Payable */}
+          <div className="pt-2 border-t border-dashed border-slate-200 flex items-center justify-between">
+            <span className="text-xs font-black text-slate-500 uppercase tracking-wider">
+              Total Payable
+            </span>
+            <span className="text-2xl font-black text-[#e02424] tracking-tight">
+              ₹{(cart.totalAmount || 0).toFixed(2)}
+            </span>
+          </div>
+
+          {/* Live Kitchen Status Banner (if order is active in kitchen) */}
+          {cart.status && cart.status !== "PENDING" && cart.status !== "COMPLETED" && cart.items.length > 0 && (
+            <div className="rounded-xl px-3 py-2 bg-slate-900 text-white flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    cart.status === "READY"
+                      ? "bg-emerald-400 animate-bounce"
+                      : cart.status === "PREPARING"
+                      ? "bg-amber-400 animate-pulse"
+                      : "bg-red-400 animate-ping"
+                  }`}
+                />
+                <p className="text-[11px] font-bold text-slate-200 truncate">
+                  {cart.status === "READY"
+                    ? "Ready to Serve!"
+                    : cart.status === "PREPARING"
+                    ? "Kitchen: In Preparation"
+                    : "Kitchen Queue"}
+                </p>
+              </div>
+
+              <Link
+                href="/user-dashboard/kitchen"
+                className="rounded-lg bg-white/10 hover:bg-white/20 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-white transition flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <span>KDS</span>
+                <FiArrowRight size={10} />
+              </Link>
+            </div>
+          )}
+
+          {/* Actions: KOT / BILL / PAY */}
+          <div className="space-y-1.5 pt-0.5">
+            {hasPendingItems ? (
+              <button
+                type="button"
+                onClick={handleSendKot}
+                disabled={cart.items.length === 0 || sendingKot || cart.status === "COMPLETED"}
+                className="w-full bg-[#e02424] hover:bg-red-700 text-white py-2.5 rounded-xl font-black uppercase tracking-wider text-xs transition-all shadow-md shadow-red-200 active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-40"
+              >
+                <RiFireLine className="mr-1.5 text-sm animate-pulse" />
+                {sendingKot
+                  ? "Sending to Kitchen..."
+                  : cart.status === "ORDERED" || cart.status === "PREPARING" || cart.status === "READY"
+                  ? "Send New Items to Kitchen (KOT) ➔"
+                  : "Order & Send to Kitchen (KOT) ➔"}
+              </button>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBillModal(true)}
+                disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-800 py-2.5 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all flex items-center justify-center cursor-pointer disabled:opacity-40"
+              >
+                <FiPrinter className="mr-1.5 text-xs" />
+                Bill
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(true)}
+                disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all shadow-md shadow-emerald-600/20 active:scale-95 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+              >
+                <FiCheckCircle className="mr-1.5 text-xs" />
+                Pay
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1141,66 +1304,146 @@ function MenusContent() {
                   </button>
                 </div>
 
-                {/* Printable Receipt Preview */}
-                <div id="printable-receipt" className="font-mono text-xs space-y-3 text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  <div className="text-center space-y-0.5 border-b border-dashed border-slate-300 pb-2">
-                    {terminalSettings.logoUrl && (
+                {/* Printable Receipt Preview matching exact reference image */}
+                <div id="printable-receipt" className="font-sans text-xs space-y-2 text-slate-900 bg-white p-4 pb-5 rounded-2xl border border-slate-200 max-w-[340px] mx-auto shadow-md">
+                  {/* Header & Logo */}
+                  <div className="text-center space-y-1">
+                    {(branchReceiptInfo?.logoUrl || terminalSettings.logoUrl) ? (
                       <div className="flex justify-center mb-1.5">
                         <img
-                          src={terminalSettings.logoUrl}
-                          alt="Hotel Logo"
-                          className="max-h-14 max-w-[130px] object-contain mx-auto"
+                          src={branchReceiptInfo?.logoUrl || terminalSettings.logoUrl}
+                          alt="Branch Logo"
+                          className="max-h-20 max-w-[190px] object-contain mx-auto drop-shadow-xs"
                         />
                       </div>
+                    ) : (
+                      <h3 className="font-black text-lg uppercase tracking-tight text-red-700">
+                        {branchReceiptInfo?.branchName || terminalSettings.restaurantName || "RESTAURANT"}
+                      </h3>
                     )}
-                    <p className="font-black text-sm uppercase">{terminalSettings.restaurantName || "TANJAVOOR RESTAURANT"}</p>
-                    <p className="text-[10px] text-slate-500">{terminalSettings.tagline || "Fine Dining & POS System"}</p>
-                    {terminalSettings.address && <p className="text-[9px] text-slate-400 truncate">{terminalSettings.address}</p>}
-                    {terminalSettings.phone && <p className="text-[9px] text-slate-500">Tel: {terminalSettings.phone}</p>}
-                    {terminalSettings.gstin && <p className="text-[9px] font-bold text-slate-600">GSTIN: {terminalSettings.gstin}</p>}
-                    <p className="text-[10px] text-slate-500 pt-0.5">{new Date().toLocaleString()}</p>
+
+                    {(branchReceiptInfo?.tagline || terminalSettings.tagline) && (
+                      <p className="text-[10.5px] font-bold text-red-600 uppercase tracking-wider">
+                        {branchReceiptInfo?.tagline || terminalSettings.tagline}
+                      </p>
+                    )}
+                    {(branchReceiptInfo?.address || terminalSettings.address) && (
+                      <p className="text-[10.5px] text-slate-600 leading-snug">
+                        {branchReceiptInfo?.address || terminalSettings.address}
+                      </p>
+                    )}
+                    {(branchReceiptInfo?.phone || terminalSettings.phone) && (
+                      <p className="text-[10.5px] text-slate-600">
+                        Tel: {branchReceiptInfo?.phone || terminalSettings.phone}
+                      </p>
+                    )}
+                    {(branchReceiptInfo?.gstin || terminalSettings.gstin) && (
+                      <p className="text-[11.5px] font-extrabold text-slate-900 pt-0.5">
+                        GSTIN: <span className="font-mono">{branchReceiptInfo?.gstin || terminalSettings.gstin}</span>
+                      </p>
+                    )}
                   </div>
 
-                  <div className="flex justify-between text-[11px] font-bold">
-                    <span>Table: {tableDisplayNum}</span>
-                    <span>{receipt.orderNumber || orderIdNumber}</span>
+                  {/* Red Solid Line */}
+                  <div className="border-t-2 border-red-600 my-1.5" />
+
+                  {/* Customer / Name placeholder */}
+                  <div className="text-[11px] text-slate-800 flex items-baseline">
+                    <span className="font-bold mr-1.5">Name:</span>
+                    <span className="border-b border-dotted border-slate-400 flex-1 h-3 inline-block" />
                   </div>
 
-                  <div className="border-t border-b border-dashed border-slate-300 py-2 space-y-1">
-                    {receipt.items.map((it, idx) => (
-                      <div key={idx} className="flex justify-between items-center">
-                        <span className="truncate pr-2">{it.name} x{it.quantity}</span>
-                        <span className="font-bold">₹{(it.price * it.quantity).toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {/* Red Dashed Line */}
+                  <div className="border-t border-dashed border-red-400 my-1" />
 
-                  <div className="space-y-1 text-right text-[11px]">
-                    <div className="flex justify-between">
-                      <span>Subtotal:</span>
-                      <span>₹{(receipt.subtotal || 0).toFixed(2)}</span>
+                  {/* Metadata: Date, Order Type, Cashier, Bill No */}
+                  <div className="space-y-0.5 text-[11px]">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">Date: {new Date().toLocaleDateString('en-GB')} {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="font-black text-red-600 uppercase tracking-wide">Dine-in (Table {tableDisplayNum})</span>
                     </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Cashier: Biller</span>
+                      <span>Bill No.: {receipt.orderNumber?.slice(-4) || orderIdNumber.slice(-4) || "1"}</span>
+                    </div>
+                    <div className="pt-0.5">
+                      <span className="font-black text-base text-red-600 tracking-tight">Token No.: {receipt.orderNumber?.replace(/\D/g, '').slice(-3) || orderIdNumber.replace(/\D/g, '').slice(-3) || "01"}</span>
+                    </div>
+                  </div>
+
+                  {/* Red Dashed Line */}
+                  <div className="border-t border-dashed border-red-400 my-1" />
+
+                  {/* Items Table with Beige Header */}
+                  <div>
+                    <div className="bg-[#f5e9d9] text-slate-900 font-bold text-[10.5px] uppercase py-1.5 px-2 grid grid-cols-12 gap-1 rounded-sm border-y border-slate-200">
+                      <span className="col-span-5 text-left">Item</span>
+                      <span className="col-span-2 text-center">Qty.</span>
+                      <span className="col-span-2 text-right">Price (₹)</span>
+                      <span className="col-span-3 text-right">Amount (₹)</span>
+                    </div>
+
+                    <div className="divide-y divide-dotted divide-slate-200 text-[11px]">
+                      {receipt.items.map((it, idx) => (
+                        <div key={idx} className="py-1 px-1.5 grid grid-cols-12 gap-1 items-center">
+                          <span className="col-span-5 font-medium truncate text-slate-900">{it.name}</span>
+                          <span className="col-span-2 text-center text-slate-700 font-semibold">{it.quantity}</span>
+                          <span className="col-span-2 text-right text-slate-700">{it.price.toFixed(2)}</span>
+                          <span className="col-span-3 text-right font-bold text-slate-900">{(it.price * it.quantity).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Dashed Red Line */}
+                  <div className="border-t border-dashed border-red-400 pt-1.5 space-y-1 text-[11px]">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-slate-900">Total Qty: {receipt.items.reduce((acc, i) => acc + i.quantity, 0)}</span>
+                      <span className="space-x-2">
+                        <span className="text-slate-600">Sub Total:</span>
+                        <span className="font-bold text-slate-900">₹{(receipt.subtotal || 0).toFixed(2)}</span>
+                      </span>
+                    </div>
+
                     {receipt.gstEnabled && (
-                      <div className="flex justify-between text-slate-500">
-                        <span>GST (5%):</span>
-                        <span>₹{(receipt.gstAmount || 0).toFixed(2)}</span>
-                      </div>
+                      <>
+                        <div className="flex justify-between text-slate-600">
+                          <span>CGST 2.5%</span>
+                          <span>₹{((receipt.gstAmount || 0) / 2).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-600">
+                          <span>SGST 2.5%</span>
+                          <span>₹{((receipt.gstAmount || 0) / 2).toFixed(2)}</span>
+                        </div>
+                      </>
                     )}
-                    <div className="flex justify-between font-black text-sm pt-1 border-t border-slate-200 text-[#e02424]">
-                      <span>Total Amount:</span>
-                      <span>₹{(receipt.totalAmount || 0).toFixed(2)}</span>
+
+                    <div className="flex justify-between text-slate-600">
+                      <span>Round off</span>
+                      <span>+ ₹{(Math.ceil(receipt.totalAmount || 0) - (receipt.totalAmount || 0)).toFixed(2)}</span>
                     </div>
-                    {receipt.paymentMethod && (
-                      <div className="flex justify-between text-[10px] text-emerald-600 font-bold">
-                        <span>Method:</span>
-                        <span>{receipt.paymentMethod} (PAID)</span>
-                      </div>
-                    )}
                   </div>
 
-                  <p className="text-center text-[10px] text-slate-400 pt-2 border-t border-dashed border-slate-300">
-                    Thank You! Please Visit Again.
-                  </p>
+                  {/* Grand Total Highlighted Strip */}
+                  <div className="bg-[#fae7dc] text-[#c92a2a] border-y-2 border-red-600 py-2 px-3 flex justify-between items-center font-black text-sm my-2">
+                    <span className="uppercase tracking-wide font-black">Grand Total</span>
+                    <span className="text-lg">₹{Math.ceil(receipt.totalAmount || 0).toFixed(2)}</span>
+                  </div>
+
+                  {receipt.paymentMethod && (
+                    <div className="flex justify-between text-[10px] text-emerald-700 font-bold px-1">
+                      <span>Payment Status:</span>
+                      <span>{receipt.paymentMethod} (PAID)</span>
+                    </div>
+                  )}
+
+                  {/* Script Footer */}
+                  <div className="text-center pt-2">
+                    <p className="italic font-bold text-slate-900 text-base font-serif">
+                      {branchReceiptInfo?.receiptFooter || "Thank you! Visit again...!!!"}
+                    </p>
+                    <div className="w-16 h-0.5 bg-red-600 rounded-full mx-auto mt-1" />
+                  </div>
                 </div>
 
                 {/* Print Button */}

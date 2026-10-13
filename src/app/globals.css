@@ -6,6 +6,48 @@
   --font-merriweather: 'Merriweather', Georgia, serif;
 }
 
+/* ========================================================================= */
+/* GLOBAL SCROLLBAR STYLES & UTILITIES                                       */
+/* ========================================================================= */
+
+/* Utility to completely hide scrollbar while keeping scrolling functional */
+.scrollbar-none,
+.no-scrollbar {
+  -ms-overflow-style: none !important; /* IE and Edge */
+  scrollbar-width: none !important; /* Firefox */
+}
+
+.scrollbar-none::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important; /* Chrome, Safari and Opera */
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Subtle, sleek modern scrollbar across all browsers */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+}
+
 :root {
   --primary-color: #e02424;
   --primary-light: #fde8e8;

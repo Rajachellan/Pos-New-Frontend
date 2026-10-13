@@ -20,6 +20,7 @@ import {
 } from "react-icons/fi";
 import { MdTableRestaurant } from "react-icons/md";
 import { useAuth } from "@/src/app/context/AuthContext";
+import { getActiveBranchReceiptInfo, generateThermalReceiptHtml } from "../../utils/receiptBranding";
 
 interface OrderItem {
   _id: string;
@@ -36,6 +37,7 @@ interface TableInfo {
 interface Order {
   _id: string;
   orderNumber?: string;
+  orderType?: string;
   tableId?: TableInfo;
   items: OrderItem[];
   subtotal?: number;
@@ -177,82 +179,48 @@ function OrderHistoryContent() {
     }
   };
 
-  const handlePrintReceipt = (order: Order) => {
-    const printWindow = window.open("", "_blank", "width=600,height=700");
+  const handlePrintReceipt = async (order: Order) => {
+    const printWindow = window.open("", "_blank", "width=380,height=650");
     if (!printWindow) return;
 
-    let settings = {
-      restaurantName: "TANJAVOOR RESTAURANT",
-      tagline: "Tax Invoice / Bill",
-      logoUrl: "",
-      phone: "",
-      address: "",
-      gstin: "",
-    };
     try {
-      const saved = localStorage.getItem("pos_terminal_settings");
-      if (saved) settings = { ...settings, ...JSON.parse(saved) };
-    } catch (e) {}
+      const receiptInfo = await getActiveBranchReceiptInfo();
+      const rawToken = order.orderNumber?.replace(/\D/g, '') || "65";
+      const tokenNumber = rawToken.length > 3 ? rawToken.slice(-3) : rawToken || "65";
 
-    const itemsHtml = order.items
-      .map(
-        (item) => `
-        <tr>
-          <td style="padding: 6px 0;">${item.name} x${item.quantity}</td>
-          <td style="padding: 6px 0; text-align: right;">₹${(item.price * item.quantity).toFixed(2)}</td>
-        </tr>
-      `
-      )
-      .join("");
+      const html = generateThermalReceiptHtml({
+        receiptInfo,
+        orderNumber: order.orderNumber || `#${order._id.slice(-6).toUpperCase()}`,
+        tokenNumber,
+        orderType: (order.orderType as any) || (order.tableId ? "Dine-In" : "Takeaway"),
+        tableNumber: order.tableId?.tableNumber,
+        customerName: "",
+        cashierName: "biller",
+        dateStr: new Date(order.createdAt).toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        items: order.items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+        subtotal: order.subtotal || order.totalAmount || 0,
+        gstAmount: order.gstAmount || 0,
+        roundOff: Math.round(((order.totalAmount || 0) - (order.subtotal || 0) - (order.gstAmount || 0)) * 100) / 100,
+        grandTotal: order.totalAmount || 0,
+        paymentMethod: order.paymentMethod,
+      });
 
-    const orderNum = order.orderNumber || `#${order._id.slice(-6).toUpperCase()}`;
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Order Receipt ${orderNum}</title>
-          <style>
-            body { font-family: 'Courier New', Courier, monospace; padding: 20px; width: 300px; margin: auto; }
-            h2, h3 { text-align: center; margin: 4px 0; }
-            .logo-wrap { text-align: center; margin-bottom: 8px; }
-            .logo-wrap img { max-height: 55px; max-width: 130px; object-fit: contain; }
-            .sub-info { font-size: 11px; text-align: center; color: #555; margin: 2px 0; }
-            .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; }
-            .total { font-weight: bold; font-size: 15px; margin-top: 10px; text-align: right; }
-          </style>
-        </head>
-        <body>
-          ${settings.logoUrl ? `<div class="logo-wrap"><img src="${settings.logoUrl}" alt="Logo" /></div>` : ''}
-          <h2>${settings.restaurantName || 'TANJAVOOR RESTAURANT'}</h2>
-          <h3>Tax Invoice / Bill</h3>
-          ${settings.address ? `<p class="sub-info">${settings.address}</p>` : ''}
-          ${settings.phone ? `<p class="sub-info">Tel: ${settings.phone}</p>` : ''}
-          ${settings.gstin ? `<p class="sub-info">GSTIN: ${settings.gstin}</p>` : ''}
-          <p style="font-size: 11px; text-align: center; margin-top: 6px;">Order: ${orderNum} | Table: #${order.tableId?.tableNumber || 'N/A'}<br/>Date: ${new Date(order.createdAt).toLocaleString()}</p>
-          <div class="divider"></div>
-          <table>
-            <thead>
-              <tr style="border-bottom: 1px solid #000;">
-                <th style="text-align: left;">Item</th>
-                <th style="text-align: right;">Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsHtml}
-            </tbody>
-          </table>
-          <div class="divider"></div>
-          <div class="total">Total: ₹${(order.totalAmount || 0).toFixed(2)}</div>
-          ${order.paymentMethod ? `<p style="text-align: right; font-size: 12px; font-weight: bold;">Payment: ${order.paymentMethod} (PAID)</p>` : ''}
-          <p style="text-align: center; margin-top: 20px; font-size: 11px;">Thank you for dining with us!</p>
-          <script>
-            window.onload = function() { window.print(); window.close(); }
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (err) {
+      console.error("Failed to generate receipt", err);
+    }
   };
 
   return (

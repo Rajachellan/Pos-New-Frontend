@@ -12,6 +12,7 @@ import {
   RiSettings3Line,
   RiLogoutBoxLine,
   RiShieldCheckLine,
+  RiTakeawayLine,
 } from "react-icons/ri"
 import { MdMeetingRoom, MdRestaurantMenu } from "react-icons/md"
 import { PiMapPinSimpleAreaFill } from "react-icons/pi"
@@ -57,6 +58,11 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
       label: "Floors & Tables",
       href: "/user-dashboard/tables",
       icon: PiMapPinSimpleAreaFill,
+    },
+    {
+      label: "Takeaway / Parcel",
+      href: "/user-dashboard/takeaway",
+      icon: RiTakeawayLine,
     },
     {
       label: "POS Menu",
@@ -106,15 +112,16 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
   ]
 
   const renderContent = (isMobile = false) => (
-    <div className="flex h-full flex-col justify-between select-none">
-      <div className="flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex h-full flex-col justify-between select-none overflow-hidden">
+      {/* Top Header & Admin Access Section (Fixed, not scrolling) */}
+      <div className="flex flex-col gap-2.5 shrink-0 pb-1">
         {/* Brand Header */}
-        <div className="flex items-center justify-between px-2 pt-2">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center justify-between px-1 pt-1">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-red-600 to-rose-500 shadow-md shadow-red-900/40">
               <SiJirasoftware className="text-white" size={20} />
             </div>
-            <div className="truncate">
+            <div className="min-w-0">
               <h2 className="font-black text-sm tracking-wide text-white uppercase truncate">
                 {organizationName || "HOTEL POS"}
               </h2>
@@ -141,79 +148,79 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
 
         {/* Quick Link to Admin Console (Visible to Admins and Managers) */}
         {(isAdmin() || isManager()) && (
-          <div className="px-1 pt-1">
+          <div className="px-0.5">
             <Link
               href="/admin-dashboard"
               onClick={() => {
                 if (isMobile) setMobileOpen?.(false);
               }}
-              className="group flex items-center justify-between gap-2.5 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 p-2.5 border border-red-900/40 hover:border-red-600/70 hover:bg-slate-800/90 transition shadow-sm"
+              className="group flex items-center justify-between gap-2 rounded-xl bg-gradient-to-r from-slate-900/90 to-slate-800/80 p-2 border border-red-900/40 hover:border-red-600/70 hover:bg-slate-800/90 transition shadow-sm"
             >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-600/20 text-red-400 border border-red-500/30 group-hover:bg-red-600 group-hover:text-white transition">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-600/20 text-red-400 border border-red-500/30 group-hover:bg-red-600 group-hover:text-white transition">
                   <RiShieldCheckLine size={15} />
                 </div>
-                <div className="truncate">
+                <div className="min-w-0 truncate">
                   <p className="text-xs font-bold text-white group-hover:text-red-400 transition truncate leading-tight">
                     Admin Console
                   </p>
-                  <p className="text-[9px] text-slate-400">Branches, Users, Roles</p>
+                  <p className="text-[9px] text-slate-400 truncate">Branches, Users, Roles</p>
                 </div>
               </div>
-              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
+              <span className="shrink-0 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
                 Manage
               </span>
             </Link>
           </div>
         )}
 
-        <div className="border-b border-slate-800/80 my-1"></div>
-
-        {/* Navigation List */}
-        <nav className="flex flex-col gap-1">
-          {operationalMenuItems.map((item) => {
-            const Icon = item.icon
-            const isActive =
-              pathname === item.href ||
-              (item.href !== "/user-dashboard" && pathname.startsWith(item.href))
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => {
-                  if (isMobile) setMobileOpen?.(false);
-                }}
-                className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-150 ${
-                  isActive
-                    ? "bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-950/40"
-                    : "text-slate-400 hover:text-slate-100 hover:bg-slate-900/90"
-                }`}
-              >
-                <Icon
-                  size={18}
-                  className={`transition-transform duration-150 group-hover:scale-110 ${
-                    isActive ? "text-white" : "text-slate-400 group-hover:text-red-400"
-                  }`}
-                />
-                <span className="truncate">{item.label}</span>
-                {isActive && (
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                )}
-              </Link>
-            )
-          })}
-        </nav>
+        <div className="border-b border-slate-800/80 my-0.5"></div>
       </div>
 
-      {/* Bottom User Card & Sign Out */}
-      <div className="pt-3 border-t border-slate-800/80 space-y-2">
+      {/* Navigation List - Sleek, scrollable without ugly scrollbar */}
+      <nav className="flex-1 flex flex-col gap-0.5 sm:gap-1 overflow-y-auto scrollbar-none py-1">
+        {operationalMenuItems.map((item) => {
+          const Icon = item.icon
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/user-dashboard" && pathname.startsWith(item.href))
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => {
+                if (isMobile) setMobileOpen?.(false);
+              }}
+              className={`group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all duration-150 ${
+                isActive
+                  ? "bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-red-950/40"
+                  : "text-slate-400 hover:text-slate-100 hover:bg-slate-900/90"
+              }`}
+            >
+              <Icon
+                size={17}
+                className={`shrink-0 transition-transform duration-150 group-hover:scale-110 ${
+                  isActive ? "text-white" : "text-slate-400 group-hover:text-red-400"
+                }`}
+              />
+              <span className="truncate">{item.label}</span>
+              {isActive && (
+                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse shrink-0" />
+              )}
+            </Link>
+          )
+        })}
+      </nav>
+
+      {/* Bottom User Card & Sign Out (Fixed at bottom) */}
+      <div className="pt-2.5 border-t border-slate-800/80 space-y-1.5 shrink-0">
         <div
           onClick={() => {
             if (isMobile) setMobileOpen?.(false);
             router.push("/user-dashboard/profile");
           }}
-          className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:bg-slate-800/90 transition cursor-pointer"
+          className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:bg-slate-800/90 transition cursor-pointer"
         >
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-red-600 to-rose-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
@@ -235,7 +242,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
 
         <button
           onClick={logout}
-          className="w-full flex items-center justify-center gap-2 py-2 text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded-xl transition cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 py-1.5 text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded-xl transition cursor-pointer"
         >
           <RiLogoutBoxLine size={15} />
           <span>Sign Out</span>
@@ -247,7 +254,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
   return (
     <>
       {/* Desktop Persistent Sidebar */}
-      <aside className="hidden lg:flex h-screen sticky left-0 top-0 flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 w-64 p-4 text-white z-40 select-none flex-shrink-0 shadow-2xl">
+      <aside className="hidden lg:flex h-screen sticky left-0 top-0 flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 w-64 p-3.5 text-white z-40 select-none flex-shrink-0 shadow-2xl overflow-hidden">
         {renderContent(false)}
       </aside>
 
@@ -261,7 +268,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
           />
 
           {/* Drawer Panel */}
-          <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] flex flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 p-4 text-white z-50 animate-in slide-in-from-left duration-250 shadow-2xl">
+          <aside className="fixed inset-y-0 left-0 w-72 max-w-[85vw] flex flex-col justify-between bg-[#0b101b] border-r border-slate-800/80 p-3.5 text-white z-50 animate-in slide-in-from-left duration-250 shadow-2xl overflow-hidden">
             {renderContent(true)}
           </aside>
         </div>

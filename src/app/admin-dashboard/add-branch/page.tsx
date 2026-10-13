@@ -29,6 +29,12 @@ interface Branch {
   branchCode: string
   address: string
   isActive?: boolean
+  logoUrl?: string
+  phone?: string
+  gstin?: string
+  fssai?: string
+  tagline?: string
+  receiptFooter?: string
   createdAt?: string
 }
 
@@ -58,6 +64,14 @@ function BranchesPage() {
   const [branchName, setBranchName] = useState<string>('')
   const [branchCode, setBranchCode] = useState<string>('')
   const [address, setAddress] = useState<string>('')
+  const [logoUrl, setLogoUrl] = useState<string>('')
+  const [phone, setPhone] = useState<string>('')
+  const [gstin, setGstin] = useState<string>('')
+  const [fssai, setFssai] = useState<string>('')
+  const [tagline, setTagline] = useState<string>('')
+  const [receiptFooter, setReceiptFooter] = useState<string>('')
+  const [uploadingLogo, setUploadingLogo] = useState<boolean>(false)
+
   const [loading, setLoading] = useState<boolean>(false)
   const [branches, setBranches] = useState<Branch[]>([])
   const [fetching, setFetching] = useState<boolean>(true)
@@ -122,12 +136,55 @@ function BranchesPage() {
     fetchOrgProfile()
   }, [])
 
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingLogo(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('image', file)
+    formData.append('folder', 'logos')
+
+    try {
+      const res = await api.post('/upload/image', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      if (res.data?.url) {
+        const newUrl = res.data.url
+        setLogoUrl(newUrl)
+        if (typeof window !== 'undefined') {
+          const prev = JSON.parse(localStorage.getItem('pos_terminal_settings') || '{}')
+          localStorage.setItem('pos_terminal_settings', JSON.stringify({ ...prev, logoUrl: newUrl }))
+          window.dispatchEvent(new Event('pos_branch_changed'))
+        }
+        setNotification({
+          type: 'success',
+          message: 'Branch logo uploaded successfully to Cloudflare R2!',
+        })
+      }
+    } catch (err: any) {
+      setNotification({
+        type: 'error',
+        message: err.response?.data?.message || 'Failed to upload branch logo image.',
+      })
+    } finally {
+      setUploadingLogo(false)
+    }
+  }
+
   function handleStartEdit(branch: Branch) {
     setActiveTab('branches')
     setEditingBranch(branch)
     setBranchName(branch.branchName)
     setBranchCode(branch.branchCode)
     setAddress(branch.address || '')
+    setLogoUrl(branch.logoUrl || '')
+    setPhone(branch.phone || '')
+    setGstin(branch.gstin || '')
+    setFssai(branch.fssai || '')
+    setTagline(branch.tagline || '')
+    setReceiptFooter(branch.receiptFooter || '')
     setNotification(null)
 
     // Smooth scroll to form
@@ -139,6 +196,12 @@ function BranchesPage() {
     setBranchName('')
     setBranchCode('')
     setAddress('')
+    setLogoUrl('')
+    setPhone('')
+    setGstin('')
+    setFssai('')
+    setTagline('')
+    setReceiptFooter('')
   }
 
   async function handleAddOrUpdateBranch(e: React.FormEvent<HTMLFormElement>) {
@@ -152,21 +215,67 @@ function BranchesPage() {
           branchName,
           branchCode,
           address,
+          logoUrl,
+          phone,
+          gstin,
+          fssai,
+          tagline,
+          receiptFooter,
         })
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(
+            'pos_terminal_settings',
+            JSON.stringify({
+              restaurantName: branchName,
+              logoUrl,
+              address,
+              phone,
+              gstin,
+              fssaiLicense: fssai,
+              tagline,
+              receiptFooter,
+            })
+          )
+          window.dispatchEvent(new Event('pos_branch_changed'))
+        }
         setNotification({
           type: 'success',
           message: res.data.message || `Branch "${branchName}" updated successfully!`,
         })
         handleCancelEdit()
       } else {
-        const res = await api.post('/add/branch', { branchName, branchCode, address })
+        const res = await api.post('/add/branch', {
+          branchName,
+          branchCode,
+          address,
+          logoUrl,
+          phone,
+          gstin,
+          fssai,
+          tagline,
+          receiptFooter,
+        })
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(
+            'pos_terminal_settings',
+            JSON.stringify({
+              restaurantName: branchName,
+              logoUrl,
+              address,
+              phone,
+              gstin,
+              fssaiLicense: fssai,
+              tagline,
+              receiptFooter,
+            })
+          )
+          window.dispatchEvent(new Event('pos_branch_changed'))
+        }
         setNotification({
           type: 'success',
           message: res.data.message || `Branch "${branchName}" added successfully!`,
         })
-        setBranchName('')
-        setBranchCode('')
-        setAddress('')
+        handleCancelEdit()
       }
       fetchBranches()
     } catch (err) {
@@ -264,7 +373,7 @@ function BranchesPage() {
               Branch & Organization Management
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-              Configure hotel branches, outlet codes, and update your official Organization business profile, legal identity, and GST details.
+              Configure hotel branches, outlet codes, branch-wise custom receipt logos (e.g. Express outlets), and update corporate details.
             </p>
           </div>
 
@@ -354,7 +463,7 @@ function BranchesPage() {
                   </h2>
                   <p className="text-xs text-slate-500 mt-1">
                     {editingBranch
-                      ? 'Update branch name, identifier code, or address below.'
+                      ? 'Update branch name, receipt logo, code, or address below.'
                       : 'Enter official details to onboard a new location node.'}
                   </p>
                 </div>
@@ -393,48 +502,163 @@ function BranchesPage() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Tanjavoor Hotel - Main Branch"
+                    placeholder="e.g. Andhra Spicy House - Express Counter"
                     value={branchName}
                     onChange={(e) => setBranchName(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition font-semibold"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Displays on floor layouts, KOT tickets, and receipts.
+                    Printed at the top of bills, floor layouts, and KOT slips.
                   </p>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                    Branch Identifier Code *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. HQ01, BR-02"
-                    value={branchCode}
-                    onChange={(e) => setBranchCode(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-xs uppercase font-mono tracking-wider text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition font-bold"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                      Outlet Code *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. EXP-01, HQ01"
+                      value={branchCode}
+                      onChange={(e) => setBranchCode(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs uppercase font-mono tracking-wider text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                      Branch Tag / Type
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Express, Dine-in, Food Court"
+                      value={tagline}
+                      onChange={(e) => setTagline(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Branch Specific Logo */}
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                      Branch Receipt Logo
+                    </label>
+                    <span className="text-[10px] text-red-600 font-semibold">Custom per branch</span>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-xl border border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden shrink-0">
+                      {logoUrl ? (
+                        <img src={logoUrl} alt="Branch Logo" className="w-full h-full object-contain p-1" />
+                      ) : (
+                        <RiStore2Line size={24} className="text-slate-300" />
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold transition shadow-xs">
+                          <span>{uploadingLogo ? 'Uploading...' : 'Upload Logo'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            disabled={uploadingLogo}
+                            onChange={handleLogoUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        {logoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setLogoUrl('')}
+                            className="text-[11px] text-slate-500 hover:text-red-600 font-medium underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        PNG or JPG. Shown on this branch's thermal bills.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                    Full Physical Address *
+                    Physical Address (Receipt Header) *
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     required
-                    placeholder="e.g. 37-1-160(64), Islampeta 2nd Line, Main Road"
+                    placeholder="e.g. No 19, CLC Works Road, Chromepet, Chennai - 600044"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition resize-none"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition resize-none"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                      Branch GSTIN
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 33EADPS1393L2Z0"
+                      value={gstin}
+                      onChange={(e) => setGstin(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs font-mono uppercase text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                      Branch Contact Phone
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. +91 98765 43210"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                      FSSAI License
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 12423008000123"
+                      value={fssai}
+                      onChange={(e) => setFssai(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs font-mono text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                      Receipt Footer Note
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Thank you! Visit again...!!!"
+                      value={receiptFooter}
+                      onChange={(e) => setReceiptFooter(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex gap-2 pt-2">
                   <button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || uploadingLogo}
                     className="flex-1 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-md shadow-red-900/20 hover:from-red-700 hover:to-rose-700 transition disabled:opacity-50 cursor-pointer"
                   >
                     {loading
@@ -465,7 +689,7 @@ function BranchesPage() {
               <div>
                 <h2 className="text-base font-bold text-slate-900">Active Branches ({branches.length})</h2>
                 <p className="text-xs text-slate-500">
-                  Click <strong className="text-red-600">"Edit Branch"</strong> on any card to update its name or address.
+                  Click <strong className="text-red-600">"Edit Branch"</strong> to configure custom logo, tagline (e.g. Express), or receipt details.
                 </p>
               </div>
 
@@ -505,13 +729,26 @@ function BranchesPage() {
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600 font-bold shrink-0">
-                            <RiBuildingLine size={20} />
-                          </div>
+                          {branch.logoUrl ? (
+                            <div className="h-12 w-12 rounded-xl border border-slate-200 bg-white p-1 flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
+                              <img src={branch.logoUrl} alt={branch.branchName} className="h-full w-full object-contain" />
+                            </div>
+                          ) : (
+                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-red-600 font-bold shrink-0">
+                              <RiBuildingLine size={22} />
+                            </div>
+                          )}
                           <div>
-                            <h3 className="text-sm font-bold text-slate-900 group-hover:text-red-600 transition">
-                              {branch.branchName}
-                            </h3>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h3 className="text-sm font-bold text-slate-900 group-hover:text-red-600 transition">
+                                {branch.branchName}
+                              </h3>
+                              {branch.tagline && (
+                                <span className="rounded-full bg-red-50 text-red-700 border border-red-200 px-2 py-0.2 text-[9px] font-extrabold uppercase">
+                                  {branch.tagline}
+                                </span>
+                              )}
+                            </div>
                             <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-bold text-slate-600 mt-0.5">
                               CODE: {branch.branchCode}
                             </span>
@@ -527,12 +764,27 @@ function BranchesPage() {
                         </span>
                       </div>
 
-                      <div className="flex items-start gap-2 pt-2 text-xs text-slate-500">
-                        <RiMapPinLine size={16} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex items-start gap-2 pt-1 text-xs text-slate-500">
+                        <RiMapPinLine size={15} className="text-slate-400 flex-shrink-0 mt-0.5" />
                         <p className="line-clamp-2 leading-relaxed text-slate-600 text-[11px]">
                           {branch.address || 'No address specified'}
                         </p>
                       </div>
+
+                      {(branch.gstin || branch.phone) && (
+                        <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-500 flex-wrap">
+                          {branch.gstin && (
+                            <span className="rounded bg-slate-50 border border-slate-200 px-1.5 py-0.5 font-mono">
+                              GST: {branch.gstin}
+                            </span>
+                          )}
+                          {branch.phone && (
+                            <span className="rounded bg-slate-50 border border-slate-200 px-1.5 py-0.5">
+                              📞 {branch.phone}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 font-semibold">
