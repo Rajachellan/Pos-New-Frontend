@@ -232,10 +232,10 @@ export function generateThermalReceiptHtml(params: {
     .map(
       (it) => `
       <tr>
-        <td style="padding: 4px 0; text-align: left; font-weight: 500; color: #111; word-break: break-word;">${it.name}</td>
-        <td style="padding: 4px 6px; text-align: center; font-weight: 700; color: #222;">${it.quantity}</td>
-        <td style="padding: 4px 6px; text-align: right; color: #222;">${it.price.toFixed(2)}</td>
-        <td style="padding: 4px 0; text-align: right; font-weight: 700; color: #111;">${(it.price * it.quantity).toFixed(2)}</td>
+        <td class="col-item">${it.name}</td>
+        <td class="col-qty">${it.quantity}</td>
+        <td class="col-price">${it.price.toFixed(2)}</td>
+        <td class="col-amount">${(it.price * it.quantity).toFixed(2)}</td>
       </tr>
     `
     )
@@ -247,231 +247,336 @@ export function generateThermalReceiptHtml(params: {
       <head>
         <meta charset="utf-8" />
         <title>Receipt ${orderNumber}</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
         <style>
+          /* =========================================================
+             TVS RP3160 Gold (80mm / 72mm Printable Width) Thermal Optimization
+             - 203 DPI (8 dots/mm) High-Density Direct Thermal
+             - Pure monochrome black (#000000) for highest thermal burn
+             - Compact vertical spacing to fit 20+ items cleanly on one bill
+             ========================================================= */
           @page {
-            margin: 0;
-            size: auto;
+            size: 80mm auto;
+            margin: 0mm;
+          }
+          @media print {
+            html, body {
+              width: 72mm !important;
+              max-width: 72mm !important;
+              min-width: 72mm !important;
+              margin: 0 auto !important;
+              padding: 1mm 1.5mm 3mm 1.5mm !important;
+              background: #ffffff !important;
+              color: #000000 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            table, tr, td, th {
+              page-break-inside: avoid !important;
+            }
           }
           * {
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           body {
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            padding: 16px 14px 24px 14px;
-            background: #fff;
-            color: #111;
-            max-width: 320px;
+            width: 72mm;
+            max-width: 72mm;
             margin: 0 auto;
-            font-size: 11.5px;
-            line-height: 1.35;
+            padding: 1mm 1.5mm 3mm 1.5mm;
+            background: #ffffff;
+            color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 11px;
+            line-height: 1.2;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: geometricPrecision;
           }
-          .header {
+
+          /* Header & Branding - Compact & High-Contrast */
+          .receipt-header {
             text-align: center;
-            margin-bottom: 6px;
+            margin-bottom: 2px;
           }
-          .logo-container {
-            margin-bottom: 6px;
+          .logo-wrapper {
+            margin-bottom: 2px;
             display: flex;
             justify-content: center;
           }
           .logo-img {
-            max-height: 85px;
-            max-width: 190px;
+            max-height: 38px;
+            max-width: 130px;
             object-fit: contain;
             display: block;
             margin: 0 auto;
+            filter: grayscale(100%) contrast(250%) brightness(90%);
+            -webkit-filter: grayscale(100%) contrast(250%) brightness(90%);
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
           }
-          .branch-name {
-            font-size: 18px;
+          .brand-title {
+            font-size: 15px;
             font-weight: 900;
-            color: #c92a2a;
+            color: #000000;
             text-transform: uppercase;
-            letter-spacing: -0.3px;
+            letter-spacing: 0.3px;
+            margin: 1px 0;
+            line-height: 1.15;
+          }
+          .brand-tagline {
+            font-size: 10px;
+            font-weight: 700;
+            color: #000000;
+            text-transform: uppercase;
+            margin: 0.5px 0;
+            line-height: 1.1;
+          }
+          .brand-address, .brand-phone {
+            font-size: 10px;
+            font-weight: 700;
+            color: #000000;
+            margin: 0.5px 0;
+            line-height: 1.2;
+          }
+          .brand-gstin {
+            font-size: 11px;
+            font-weight: 900;
+            color: #000000;
+            margin-top: 1px;
+            letter-spacing: 0.3px;
+          }
+
+          /* Clean Dividers */
+          .divider-solid {
+            border-top: 1px solid #000000;
             margin: 2px 0;
           }
-          .branch-sub {
-            font-size: 11px;
-            color: #333;
-            margin: 1.5px 0;
-            line-height: 1.35;
+          .divider-dashed {
+            border-top: 1px dashed #000000;
+            margin: 2px 0;
           }
-          .gst-badge {
-            font-size: 12px;
-            font-weight: 800;
-            color: #000;
-            margin-top: 3px;
+
+          /* Compact Token Strip (Saves 40px+ height) */
+          .token-strip {
+            border: 1.5px solid #000000;
+            padding: 2px 6px;
+            margin: 2px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
           }
-          .red-line {
-            border-top: 2px solid #b91c1c;
-            margin: 8px 0 6px 0;
+          .token-title {
+            font-size: 10.5px;
+            font-weight: 900;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
           }
-          .red-dashed {
-            border-top: 1px dashed #ef4444;
-            margin: 6px 0;
+          .token-number {
+            font-size: 16px;
+            font-weight: 900;
+            letter-spacing: 0.5px;
+            line-height: 1;
           }
+
+          /* Metadata rows */
           .meta-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 11.5px;
-            margin: 2px 0;
-            color: #111;
+            font-size: 10.5px;
+            font-weight: 700;
+            color: #000000;
+            margin: 1px 0;
+            line-height: 1.2;
           }
-          .token-badge {
-            color: #b91c1c;
+          .order-type-tag {
             font-weight: 900;
-            font-size: 17px;
-            letter-spacing: -0.3px;
-          }
-          .order-type-badge {
-            color: #b91c1c;
-            font-weight: 900;
-            font-size: 13px;
             text-transform: uppercase;
           }
-          table {
+
+          /* High-Density Items Table (Fits 20+ items cleanly) */
+          .items-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11.5px;
-            margin: 4px 0;
+            margin: 2px 0;
+            table-layout: fixed;
           }
-          th {
-            background-color: #f5e9d9;
-            padding: 5px 4px;
+          .items-table th {
+            padding: 2.5px 1px;
+            font-size: 10px;
+            font-weight: 900;
+            color: #000000;
+            text-transform: uppercase;
+            border-top: 1px dashed #000000;
+            border-bottom: 1px dashed #000000;
+          }
+          .items-table td {
+            padding: 1.5px 1px;
+            font-size: 10.5px;
+            font-weight: 700;
+            color: #000000;
+            vertical-align: top;
+            line-height: 1.15;
+          }
+          .col-item {
+            width: 50%;
+            text-align: left;
+            word-break: break-word;
+          }
+          .col-qty {
+            width: 13%;
+            text-align: center;
+          }
+          .col-price {
+            width: 17%;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+          }
+          .col-amount {
+            width: 20%;
+            text-align: right;
             font-weight: 800;
-            color: #111;
-            font-size: 11px;
-            border-top: 1px solid #e2e8f0;
-            border-bottom: 1px solid #e2e8f0;
+            font-variant-numeric: tabular-nums;
           }
+
+          /* Compact Totals Table */
           .totals-table {
             width: 100%;
-            font-size: 11.5px;
-            margin-top: 4px;
+            font-size: 10.5px;
+            font-weight: 700;
+            color: #000000;
+            border-collapse: collapse;
+            margin: 1.5px 0;
           }
           .totals-table td {
-            padding: 2.5px 0;
+            padding: 1px 0;
+            line-height: 1.2;
           }
-          .grand-total-bar {
-            background-color: #fae7dc;
-            border-top: 2.5px solid #b91c1c;
-            border-bottom: 2.5px solid #b91c1c;
-            padding: 7px 10px;
+
+          /* Grand Total Bar */
+          .grand-total-container {
+            border-top: 1.5px solid #000000;
+            border-bottom: 1.5px solid #000000;
+            padding: 3px 0;
+            margin: 3px 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin: 8px 0;
-            font-weight: 900;
-            color: #b91c1c;
           }
           .grand-total-label {
-            font-size: 15px;
+            font-size: 13px;
+            font-weight: 900;
             text-transform: uppercase;
-            letter-spacing: 0.2px;
+            letter-spacing: 0.5px;
           }
           .grand-total-val {
-            font-size: 18px;
+            font-size: 16px;
+            font-weight: 900;
             letter-spacing: -0.2px;
           }
-          .footer-note {
+
+          .payment-row {
+            text-align: right;
+            font-size: 10.5px;
+            font-weight: 900;
+            margin-top: 1.5px;
+          }
+
+          /* Footer */
+          .receipt-footer {
             text-align: center;
-            margin-top: 12px;
-            font-family: 'Caveat', 'Dancing Script', cursive;
-            font-size: 21px;
-            font-weight: 700;
-            color: #111;
+            margin-top: 4px;
+            margin-bottom: 2px;
           }
-          .footer-line {
-            width: 75px;
-            height: 3px;
-            background: #b91c1c;
-            border-radius: 9999px;
-            margin: 4px auto 0 auto;
+          .footer-msg {
+            font-size: 11px;
+            font-weight: 800;
+            font-style: italic;
+            color: #000000;
+            margin-bottom: 2px;
           }
-          .paper-zigzag {
-            width: 100%;
-            height: 12px;
-            margin-top: 16px;
-            background: radial-gradient(circle at 10px -5px, transparent 12px, #fff 13px) repeat-x;
-            background-size: 20px 20px;
+          .footer-divider {
+            width: 48px;
+            height: 1px;
+            background: #000000;
+            margin: 2px auto;
           }
         </style>
       </head>
       <body>
-        <div class="header">
+        <div class="receipt-header">
           ${
             receiptInfo.logoUrl
-              ? `<div class="logo-container"><img class="logo-img" src="${receiptInfo.logoUrl}" alt="${receiptInfo.branchName}" /></div>`
-              : `<div class="branch-name">${receiptInfo.branchName}</div>`
+              ? `<div class="logo-wrapper"><img class="logo-img" src="${receiptInfo.logoUrl}" alt="${receiptInfo.branchName}" /></div>`
+              : ""
           }
-          ${receiptInfo.tagline ? `<div class="branch-sub" style="font-weight: 600; color: #b91c1c;">${receiptInfo.tagline}</div>` : ""}
-          ${receiptInfo.address ? `<div class="branch-sub">${receiptInfo.address}</div>` : ""}
-          ${receiptInfo.phone ? `<div class="branch-sub">Tel: ${receiptInfo.phone}</div>` : ""}
-          ${receiptInfo.gstin ? `<div class="gst-badge">GSTIN: <span style="font-family: monospace;">${receiptInfo.gstin}</span></div>` : ""}
+          <div class="brand-title">${receiptInfo.branchName}</div>
+          ${receiptInfo.tagline ? `<div class="brand-tagline">${receiptInfo.tagline}</div>` : ""}
+          ${receiptInfo.address ? `<div class="brand-address">${receiptInfo.address}</div>` : ""}
+          ${receiptInfo.phone ? `<div class="brand-phone">Tel: ${receiptInfo.phone}</div>` : ""}
+          ${receiptInfo.gstin ? `<div class="brand-gstin">GSTIN: ${receiptInfo.gstin}</div>` : ""}
         </div>
 
-        <div class="red-line"></div>
+        <div class="divider-solid"></div>
 
-        <div style="font-size: 11.5px; margin-bottom: 4px; color: #111; display: flex; align-items: baseline;">
-          <span style="font-weight: 600; margin-right: 4px;">Name:</span>
-          <span style="border-bottom: 1px dotted #94a3b8; flex: 1; height: 12px; display: inline-block;">${customerName}</span>
-        </div>
-
-        <div class="red-dashed"></div>
+        ${
+          customerName && customerName.trim()
+            ? `<div class="meta-row" style="margin-bottom: 2px;">
+                 <span>Customer: <strong>${customerName}</strong></span>
+               </div>`
+            : ""
+        }
 
         <div class="meta-row">
           <span>Date: ${dateStr}</span>
-          <span class="order-type-badge">${orderType}</span>
+          <span class="order-type-tag">${orderType}${tableNumber ? ` (Table #${tableNumber})` : ""}</span>
         </div>
-        <div class="meta-row" style="color: #333;">
+        <div class="meta-row">
+          <span>Bill No: ${orderNumber}</span>
           <span>Cashier: ${cashierName}</span>
-          <span>Bill No.: ${orderNumber}</span>
-        </div>
-        ${tableNumber ? `<div class="meta-row"><span>Table: #${tableNumber}</span></div>` : ""}
-        <div class="meta-row" style="margin-top: 3px;">
-          <span class="token-badge">Token No.: ${tokenNumber}</span>
         </div>
 
-        <div class="red-dashed"></div>
+        <div class="token-strip">
+          <span class="token-title">TOKEN NUMBER</span>
+          <span class="token-number">#${tokenNumber}</span>
+        </div>
 
-        <table>
+        <table class="items-table">
           <thead>
             <tr>
-              <th style="text-align: left;">Item</th>
-              <th style="text-align: center;">Qty.</th>
-              <th style="text-align: right;">Price (₹)</th>
-              <th style="text-align: right;">Amount (₹)</th>
+              <th class="col-item">Item</th>
+              <th class="col-qty">Qty</th>
+              <th class="col-price">Price</th>
+              <th class="col-amount">Amount</th>
             </tr>
           </thead>
-          <tbody style="border-bottom: 1px dotted #e2e8f0;">
+          <tbody>
             ${itemsHtml}
           </tbody>
         </table>
 
-        <div class="red-dashed"></div>
+        <div class="divider-dashed"></div>
 
         <table class="totals-table">
           <tr>
-            <td style="font-weight: 700; width: 45%;">Total Qty: ${totalQty}</td>
-            <td style="text-align: right; color: #475569;">Sub Total</td>
-            <td style="text-align: right; font-weight: 700; width: 28%;">₹ ${subtotal.toFixed(2)}</td>
+            <td style="width: 45%; font-weight: 800;">Total Qty: ${totalQty}</td>
+            <td style="text-align: right; font-weight: 700;">Sub Total:</td>
+            <td style="text-align: right; font-weight: 800; width: 26%;">₹${subtotal.toFixed(2)}</td>
           </tr>
           ${
             gstAmount > 0
               ? `
             <tr>
               <td></td>
-              <td style="text-align: right; color: #475569;">CGST ${halfGstRate}%</td>
-              <td style="text-align: right; font-weight: 700;">₹ ${halfGstAmount}</td>
+              <td style="text-align: right; font-weight: 700;">CGST ${halfGstRate}%:</td>
+              <td style="text-align: right; font-weight: 800;">₹${halfGstAmount}</td>
             </tr>
             <tr>
               <td></td>
-              <td style="text-align: right; color: #475569;">SGST ${halfGstRate}%</td>
-              <td style="text-align: right; font-weight: 700;">₹ ${halfGstAmount}</td>
+              <td style="text-align: right; font-weight: 700;">SGST ${halfGstRate}%:</td>
+              <td style="text-align: right; font-weight: 800;">₹${halfGstAmount}</td>
             </tr>
           `
               : ""
@@ -481,37 +586,56 @@ export function generateThermalReceiptHtml(params: {
               ? `
             <tr>
               <td></td>
-              <td style="text-align: right; color: #475569;">Round off</td>
-              <td style="text-align: right; font-weight: 700;">${roundOff > 0 ? "+" : ""} ₹ ${roundOff.toFixed(2)}</td>
+              <td style="text-align: right; font-weight: 700;">Round off:</td>
+              <td style="text-align: right; font-weight: 800;">${roundOff > 0 ? "+" : ""}₹${roundOff.toFixed(2)}</td>
             </tr>
           `
               : ""
           }
         </table>
 
-        <div class="grand-total-bar">
+        <div class="grand-total-container">
           <span class="grand-total-label">Grand Total</span>
-          <span class="grand-total-val">₹ ${grandTotal.toFixed(2)}</span>
+          <span class="grand-total-val">₹${grandTotal.toFixed(2)}</span>
         </div>
 
         ${
           paymentMethod
-            ? `<div style="font-size: 11px; text-align: right; font-weight: 700; color: #15803d; margin-top: 2px;">Payment: ${paymentMethod} (PAID)</div>`
+            ? `<div class="payment-row">PAYMENT: ${paymentMethod.toUpperCase()} (PAID)</div>`
             : ""
         }
 
-        <div class="footer-note">
-          ${receiptInfo.receiptFooter || "Thank you! Visit again...!!!"}
+        <div class="receipt-footer">
+          <div class="footer-msg">
+            ${receiptInfo.receiptFooter || "Thank you! Visit again...!!!"}
+          </div>
+          <div class="footer-divider"></div>
         </div>
-        <div class="footer-line"></div>
 
         <script>
-          window.onload = function() {
+          function executePrint() {
+            window.focus();
             window.print();
+          }
+          window.onafterprint = function() {
             setTimeout(function() {
               window.close();
-            }, 600);
+            }, 300);
           };
+          var img = document.querySelector('.logo-img');
+          if (img && !img.complete) {
+            img.onload = executePrint;
+            img.onerror = executePrint;
+            setTimeout(executePrint, 1200);
+          } else {
+            if (document.readyState === 'complete') {
+              setTimeout(executePrint, 150);
+            } else {
+              window.addEventListener('load', function() {
+                setTimeout(executePrint, 150);
+              });
+            }
+          }
         </script>
       </body>
     </html>

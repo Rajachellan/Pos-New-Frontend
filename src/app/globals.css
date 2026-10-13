@@ -253,11 +253,18 @@ h6 {
 }
 
 /* ========================================================================= */
-/* POS THERMAL RECEIPT PRINT STYLES                                          */
+/* POS THERMAL RECEIPT PRINT STYLES (TVS RP3160 Gold 80mm/72mm)               */
 /* ========================================================================= */
+@page {
+  size: 80mm auto;
+  margin: 0mm;
+}
+
 @media print {
   body {
     background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
   body * {
     visibility: hidden;
@@ -267,17 +274,20 @@ h6 {
     visibility: visible;
   }
   #printable-receipt {
-    position: fixed;
+    position: absolute;
     left: 0;
     top: 0;
-    width: 80mm !important;
-    max-width: 80mm !important;
+    width: 72mm !important;
+    max-width: 72mm !important;
+    min-width: 72mm !important;
     margin: 0 auto !important;
-    padding: 8px !important;
+    padding: 2mm 1.5mm !important;
     background: #ffffff !important;
     color: #000000 !important;
     border: none !important;
     box-shadow: none !important;
-    font-family: monospace, 'Courier New', Courier !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

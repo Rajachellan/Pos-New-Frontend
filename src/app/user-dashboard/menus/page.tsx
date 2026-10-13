@@ -21,7 +21,7 @@ import {
 } from "react-icons/fi"
 import { RiFireLine } from "react-icons/ri"
 import { sortTablesNaturally } from '../../utils/tableSort'
-import { getActiveBranchReceiptInfo, BranchReceiptInfo } from '../../utils/receiptBranding'
+import { getActiveBranchReceiptInfo, BranchReceiptInfo, generateThermalReceiptHtml } from '../../utils/receiptBranding'
 
 interface MenuItem {
   _id: string
@@ -511,6 +511,68 @@ function MenusContent() {
 
   const areaDisplayName = table?.areaName?.areaName || "Dining Area"
   const orderIdNumber = cart.orderNumber || (cart._id ? `#${cart._id.slice(-4).toUpperCase()}` : "#50")
+
+  // High-Density Thermal Receipt Print Handler (TVS RP3160 Gold 80mm)
+  const handlePrintReceipt = async () => {
+    const receipt = paidOrderData || cart
+    if (!receipt || !receipt.items || receipt.items.length === 0) {
+      alert("No order items available to print receipt.")
+      return
+    }
+
+    const printWindow = window.open("", "_blank", "width=380,height=650")
+    if (!printWindow) {
+      window.print()
+      return
+    }
+
+    try {
+      const receiptInfo = branchReceiptInfo || (await getActiveBranchReceiptInfo())
+      const rawOrderNo = receipt.orderNumber || orderIdNumber || "1"
+      const rawToken = receipt.orderNumber?.replace(/\D/g, '') || orderIdNumber?.replace(/\D/g, '') || "65"
+      const tokenNumber = rawToken.length > 3 ? rawToken.slice(-3) : rawToken || "65"
+
+      const subtotalVal = receipt.subtotal || 0
+      const gstVal = receipt.gstAmount || 0
+      const totalVal = Math.ceil(receipt.totalAmount || (subtotalVal + gstVal))
+      const roundOffVal = Math.round((totalVal - subtotalVal - gstVal) * 100) / 100
+
+      const html = generateThermalReceiptHtml({
+        receiptInfo,
+        orderNumber: rawOrderNo,
+        tokenNumber,
+        orderType: "Dine-In",
+        tableNumber: tableDisplayNum,
+        customerName: "",
+        cashierName: "biller",
+        dateStr: new Date().toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        items: (receipt.items || []).map((it: any) => ({
+          name: it.name,
+          quantity: it.quantity,
+          price: it.price,
+        })),
+        subtotal: subtotalVal,
+        gstAmount: gstVal,
+        gstRate: 5,
+        roundOff: roundOffVal,
+        grandTotal: totalVal,
+        paymentMethod: receipt.paymentMethod,
+      })
+
+      printWindow.document.open()
+      printWindow.document.write(html)
+      printWindow.document.close()
+    } catch (err) {
+      console.error("Failed to generate thermal receipt", err)
+      printWindow.close()
+    }
+  }
 
   // Check if cart has pending items (NEW)
   const hasPendingItems =
@@ -1252,11 +1314,12 @@ function MenusContent() {
                     setRedirectCountdown(null)
                     setPaymentSuccess(false)
                     setShowBillModal(true)
+                    handlePrintReceipt()
                   }}
                   className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 py-3 rounded-2xl font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center cursor-pointer"
                 >
                   <FiPrinter className="mr-2" size={15} />
-                  Print Receipt
+                  Print Receipt (TVS RP3160)
                 </button>
 
                 <button
@@ -1450,11 +1513,11 @@ function MenusContent() {
                 <div className="pt-2 space-y-2">
                   <button
                     type="button"
-                    onClick={() => window.print()}
+                    onClick={handlePrintReceipt}
                     className="w-full bg-[#e02424] hover:bg-red-700 text-white py-3.5 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 cursor-pointer"
                   >
                     <FiPrinter className="mr-2 text-sm" />
-                    Print Receipt Now
+                    Print Receipt Now (TVS RP3160)
                   </button>
 
                   {paidOrderData && (
