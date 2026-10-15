@@ -54,7 +54,7 @@ export default function DashboardLayoutWrapper({
       <Sidebar mobileOpen={mobileSidebarOpen} setMobileOpen={setMobileSidebarOpen} />
       <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
         <Navbar onToggleMobileMenu={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 w-full">{children}</main>
       </div>
     </section>
   );

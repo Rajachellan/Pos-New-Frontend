@@ -93,7 +93,7 @@ function MenusContent() {
 
   const [search, setSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("all")
-  const [dietFilter, setDietFilter] = useState<"all" | "veg" | "non_veg">("all")
+  const [dietFilter, setDietFilter] = useState<"all" | "veg" | "non_veg" | "selected">("all")
   const [loading, setLoading] = useState(true)
 
   // Modals
@@ -313,12 +313,29 @@ function MenusContent() {
   const totalVegCount = useMemo(() => menuItems.filter((m) => isDishVeg(m)).length, [menuItems])
   const totalNonVegCount = useMemo(() => menuItems.filter((m) => !isDishVeg(m)).length, [menuItems])
 
+  // Helper to find if a menu item is already in the cart
+  const getCartItemInfo = (item: MenuItem): CartItem | null => {
+    return (
+      cart.items.find((i) => {
+        const mId = typeof i.menuId === "object" ? i.menuId?._id : i.menuId
+        return mId === item._id || (i.name && i.name.toLowerCase() === item.name.toLowerCase())
+      }) || null
+    )
+  }
+
   // Filtered Menu Items
   const filteredMenuItems = useMemo(() => {
     return menuItems.filter((item) => {
       const isVeg = isDishVeg(item)
       if (dietFilter === "veg" && !isVeg) return false
       if (dietFilter === "non_veg" && isVeg) return false
+      if (dietFilter === "selected") {
+        const inCart = cart.items.some((i) => {
+          const mId = typeof i.menuId === "object" ? i.menuId?._id : i.menuId
+          return mId === item._id || (i.name && i.name.toLowerCase() === item.name.toLowerCase())
+        })
+        if (!inCart) return false
+      }
 
       const matchesCategory =
         selectedCategory === "all" ||
@@ -329,7 +346,7 @@ function MenusContent() {
         item.category?.toLowerCase().includes(search.toLowerCase())
       return matchesCategory && matchesSearch
     })
-  }, [menuItems, selectedCategory, search, dietFilter])
+  }, [menuItems, selectedCategory, search, dietFilter, cart.items])
 
   // Partitioned lists for clean separate sections
   const vegDishes = useMemo(() => filteredMenuItems.filter((m) => isDishVeg(m)), [filteredMenuItems])
@@ -580,25 +597,136 @@ function MenusContent() {
     (cart.items.some((i) => i.kitchenStatus === "NEW" || !i.kitchenStatus) ||
       cart.status === "PENDING")
 
+  // Render a dish card with selection state, badge and quick-stepper
+  const renderDishCard = (item: MenuItem, isVegDish: boolean) => {
+    const inCart = getCartItemInfo(item)
+    const qty = inCart ? (inCart.quantity || 1) : 0
+    const itemId = inCart?._id || (typeof inCart?.menuId === 'object' ? inCart?.menuId?._id : inCart?.menuId) || item._id
+
+    return (
+      <div
+        key={item._id}
+        onClick={() => {
+          if (!inCart) {
+            handleAddItem(item)
+          }
+        }}
+        className={`rounded-2xl p-3 sm:p-3.5 transition-all flex flex-col justify-between group h-36 relative select-none ${
+          qty > 0
+            ? "bg-red-50/30 border-2 border-[#e02424] shadow-xs ring-2 ring-red-500/10 cursor-default"
+            : isVegDish
+            ? "bg-white border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-emerald-500 hover:ring-2 hover:ring-emerald-100 cursor-pointer"
+            : "bg-white border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-red-400 hover:ring-2 hover:ring-red-100 cursor-pointer"
+        }`}
+      >
+        <div>
+          <div className="flex items-center justify-between gap-1.5 mb-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className={`w-3.5 h-3.5 rounded-xs border-2 flex items-center justify-center bg-white shrink-0 ${
+                  isVegDish ? "border-emerald-600" : "border-rose-700"
+                }`}
+                title={isVegDish ? "Pure Veg" : "Non-Veg"}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${isVegDish ? "bg-emerald-600" : "bg-rose-700"}`} />
+              </span>
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 truncate">
+                {item.category || "Special"}
+              </span>
+            </div>
+
+            {qty > 0 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-[#e02424] text-white shadow-2xs shrink-0 animate-in zoom-in-75 duration-150">
+                <FiCheckCircle size={9} />
+                <span>{qty} In Order</span>
+              </span>
+            )}
+          </div>
+
+          <h3
+            className={`text-xs sm:text-[13px] font-bold leading-snug line-clamp-2 transition-colors ${
+              qty > 0 ? "text-slate-900 font-extrabold" : "text-slate-800 group-hover:text-slate-900"
+            }`}
+            title={item.name}
+          >
+            {item.name}
+          </h3>
+        </div>
+
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+          <div>
+            <span className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+              ₹{Number(item.price).toFixed(2)}
+            </span>
+          </div>
+
+          {qty > 0 ? (
+            <div
+              className="flex items-center bg-white rounded-lg p-0.5 border border-red-200 shadow-2xs shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => handleUpdateQuantity(itemId, 'decrease')}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-700 hover:text-[#e02424] transition active:scale-90 cursor-pointer"
+                title="Decrease quantity"
+              >
+                <FiMinus size={11} />
+              </button>
+              <span className="w-5 text-center font-black text-[#e02424] text-xs">
+                {qty}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleUpdateQuantity(itemId, 'increase')}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-700 hover:text-[#e02424] transition active:scale-90 cursor-pointer"
+                title="Increase quantity"
+              >
+                <FiPlus size={11} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleAddItem(item)
+              }}
+              className={`p-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95 shrink-0 ${
+                isVegDish
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white"
+                  : "bg-red-50 text-[#e02424] hover:bg-[#e02424] hover:text-white"
+              }`}
+              title="Add to order"
+            >
+              <FiPlus size={13} />
+              <span>Add</span>
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="h-[calc(100vh-73px)] flex flex-col md:flex-row bg-slate-50 relative overflow-hidden">
+    <div className="h-[calc(100vh-65px)] flex flex-row bg-slate-50 relative overflow-hidden w-full min-w-0 max-w-full">
       
-      {/* 1. LEFT COLUMN: MENU (EXACT PETPOOJA SCREENSHOT 3) */}
-      <div className="flex-1 flex flex-col min-h-0 border-r border-slate-200 bg-white">
+      {/* 1. LEFT COLUMN: MENU */}
+      <div className="flex-1 flex flex-col min-h-0 min-w-0 h-full border-r border-slate-200 bg-white overflow-hidden">
         
         {/* Menu Header */}
-        <div className="p-4 border-b border-slate-100 space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="p-3 sm:p-4 border-b border-slate-100 space-y-2.5 shrink-0 min-w-0 w-full">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center">
               <span className="mr-2 p-1.5 bg-red-100 rounded-lg text-[#e02424]">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 11V9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2"/><path d="M3 11v3a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M7 11v4"/><path d="M11 11v4"/><path d="M15 11v4"/><path d="M19 11v4"/><path d="M5 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/><path d="M2 19h20"/>
                 </svg>
               </span>
               Menu
             </h2>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => navigateToTables()}
@@ -619,7 +747,7 @@ function MenusContent() {
                 onClick={() => setShowManualItemModal(true)}
                 className="text-xs font-black uppercase tracking-widest text-[#e02424] hover:text-red-700 transition-colors flex items-center cursor-pointer px-2 py-1.5"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" className="mr-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
                   <path d="M12 5v14"/><path d="M5 12h14"/>
                 </svg>
                 + Manual Item
@@ -637,18 +765,18 @@ function MenusContent() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search menu items..."
-              className="block w-full pl-10 pr-3 py-2.5 border border-slate-200 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#e02424] focus:border-transparent transition-all text-sm font-medium text-slate-800"
+              className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#e02424] focus:border-transparent transition-all text-sm font-medium text-slate-800"
             />
           </div>
 
-          {/* Filters Row: Diet Filter (Veg / Non-Veg) + Category Pills */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          {/* Filters Row: Diet Filter (Veg / Non-Veg / Selected) + Category Pills */}
+          <div className="flex items-center gap-2 min-w-0 w-full overflow-hidden">
             {/* Diet Segmented Switch */}
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80 shrink-0">
               <button
                 type="button"
                 onClick={() => setDietFilter("all")}
-                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                   dietFilter === "all"
                     ? "bg-white text-slate-900 shadow-xs"
                     : "text-slate-600 hover:text-slate-900"
@@ -660,14 +788,14 @@ function MenusContent() {
               <button
                 type="button"
                 onClick={() => setDietFilter("veg")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                   dietFilter === "veg"
                     ? "bg-emerald-600 text-white shadow-xs"
                     : "text-emerald-700 hover:bg-emerald-50/80"
                 }`}
               >
-                <span className="w-3 h-3 rounded-xs border-2 border-current flex items-center justify-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                <span className="w-2.5 h-2.5 rounded-xs border border-current flex items-center justify-center">
+                  <span className="w-1 h-1 rounded-full bg-current" />
                 </span>
                 <span>Veg ({totalVegCount})</span>
               </button>
@@ -675,23 +803,36 @@ function MenusContent() {
               <button
                 type="button"
                 onClick={() => setDietFilter("non_veg")}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                   dietFilter === "non_veg"
                     ? "bg-rose-700 text-white shadow-xs"
                     : "text-rose-700 hover:bg-rose-50/80"
                 }`}
               >
-                <span className="w-3 h-3 rounded-xs border-2 border-current flex items-center justify-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                <span className="w-2.5 h-2.5 rounded-xs border border-current flex items-center justify-center">
+                  <span className="w-1 h-1 rounded-full bg-current" />
                 </span>
                 <span>Non-Veg ({totalNonVegCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDietFilter("selected")}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  dietFilter === "selected"
+                    ? "bg-[#e02424] text-white shadow-xs"
+                    : "text-slate-700 hover:text-[#e02424] hover:bg-red-50/80"
+                }`}
+              >
+                <FiCheckCircle size={11} className={dietFilter === "selected" ? "text-white" : "text-[#e02424]"} />
+                <span>In Order ({cart.items.length})</span>
               </button>
             </div>
 
             <div className="h-5 w-px bg-slate-200 hidden sm:block shrink-0" />
 
-            {/* Categories Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none flex-1">
+            {/* Categories Pills - Auto-clamps with w-0 min-w-0 */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none flex-1 min-w-0 w-0">
               <button
                 onClick={() => setSelectedCategory("all")}
                 className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
@@ -721,24 +862,39 @@ function MenusContent() {
         </div>
 
         {/* Menu Items Grid with Separate Veg & Non-Veg Sections */}
-        <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 space-y-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-slate-50/50 space-y-5 min-w-0">
           {loading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-36 rounded-2xl bg-white border border-slate-200 p-4 animate-pulse flex flex-col justify-between" />
               ))}
             </div>
           ) : filteredMenuItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-              <p className="font-bold tracking-tight">No menu items found</p>
-              <p className="text-sm mt-1">Try searching for a different item or select another category/diet filter</p>
+              <p className="font-bold tracking-tight text-slate-700">
+                {dietFilter === "selected" ? "No items selected in this order yet" : "No menu items found"}
+              </p>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm text-center">
+                {dietFilter === "selected"
+                  ? "Click on any dish from the menu to add it to the order."
+                  : "Try searching for a different item or select another category/diet filter."}
+              </p>
+              {dietFilter === "selected" && (
+                <button
+                  type="button"
+                  onClick={() => setDietFilter("all")}
+                  className="mt-3 px-3 py-1.5 bg-[#e02424] text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                >
+                  View All Dishes
+                </button>
+              )}
             </div>
           ) : (
             <>
               {/* 🟢 VEGETARIAN DISHES SECTION */}
-              {(dietFilter === "all" || dietFilter === "veg") && vegDishes.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-emerald-200/80">
+              {(dietFilter === "all" || dietFilter === "veg" || dietFilter === "selected") && vegDishes.length > 0 && (
+                <div className="space-y-2.5 min-w-0">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-emerald-200/80">
                     <div className="flex items-center gap-2">
                       <span className="w-5 h-5 rounded-sm border-2 border-emerald-600 flex items-center justify-center bg-white shadow-2xs">
                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
@@ -752,50 +908,16 @@ function MenusContent() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {vegDishes.map((item) => (
-                      <div
-                        key={item._id}
-                        onClick={() => handleAddItem(item)}
-                        className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-emerald-500 hover:ring-2 hover:ring-emerald-100 transition-all cursor-pointer flex flex-col justify-between group h-36 relative overflow-hidden"
-                      >
-                        <div>
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="w-3.5 h-3.5 rounded-xs border-2 border-emerald-600 flex items-center justify-center bg-white shrink-0" title="Pure Veg">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                            </span>
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 truncate">
-                              {item.category || "Special"}
-                            </span>
-                            <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-emerald-50 text-emerald-700">
-                              Veg
-                            </span>
-                          </div>
-                          <h3 className="text-sm font-bold text-slate-900 group-hover:text-emerald-700 transition-colors leading-snug line-clamp-2">
-                            {item.name}
-                          </h3>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-lg font-black text-slate-900 tracking-tighter">
-                            ₹{Number(item.price).toFixed(2)}
-                          </span>
-                          <div className="bg-emerald-50 p-1.5 rounded-lg text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-xs">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M5 12h14"/><path d="M12 5v14"/>
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                    {vegDishes.map((item) => renderDishCard(item, true))}
                   </div>
                 </div>
               )}
 
               {/* 🔴 NON-VEGETARIAN DISHES SECTION */}
-              {(dietFilter === "all" || dietFilter === "non_veg") && nonVegDishes.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-rose-200/80">
+              {(dietFilter === "all" || dietFilter === "non_veg" || dietFilter === "selected") && nonVegDishes.length > 0 && (
+                <div className="space-y-2.5 min-w-0">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-rose-200/80">
                     <div className="flex items-center gap-2">
                       <span className="w-5 h-5 rounded-sm border-2 border-rose-700 flex items-center justify-center bg-white shadow-2xs">
                         <span className="w-2.5 h-2.5 rounded-full bg-rose-700" />
@@ -809,42 +931,8 @@ function MenusContent() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {nonVegDishes.map((item) => (
-                      <div
-                        key={item._id}
-                        onClick={() => handleAddItem(item)}
-                        className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-[#e02424] hover:ring-2 hover:ring-red-100 transition-all cursor-pointer flex flex-col justify-between group h-36 relative overflow-hidden"
-                      >
-                        <div>
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="w-3.5 h-3.5 rounded-xs border-2 border-rose-700 flex items-center justify-center bg-white shrink-0" title="Non-Veg">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-700" />
-                            </span>
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 truncate">
-                              {item.category || "Special"}
-                            </span>
-                            <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-rose-50 text-rose-700">
-                              Non-Veg
-                            </span>
-                          </div>
-                          <h3 className="text-sm font-bold text-slate-900 group-hover:text-[#e02424] transition-colors leading-snug line-clamp-2">
-                            {item.name}
-                          </h3>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-lg font-black text-slate-900 tracking-tighter">
-                            ₹{Number(item.price).toFixed(2)}
-                          </span>
-                          <div className="bg-red-50 p-1.5 rounded-lg text-[#e02424] group-hover:bg-[#e02424] group-hover:text-white transition-all shadow-xs">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M5 12h14"/><path d="M12 5v14"/>
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                    {nonVegDishes.map((item) => renderDishCard(item, false))}
                   </div>
                 </div>
               )}
@@ -854,39 +942,39 @@ function MenusContent() {
 
       </div>
 
-      {/* 2. RIGHT COLUMN: CURRENT ORDER PANEL */}
-      <div className="w-full md:w-[420px] lg:w-[460px] flex flex-col bg-white border-l border-slate-200 h-full shadow-2xl md:shadow-none shrink-0 min-h-0">
+      {/* 2. RIGHT COLUMN: CURRENT ORDER PANEL - Always visible, fixed width */}
+      <div className="w-[340px] lg:w-[360px] flex flex-col bg-white border-l border-slate-200 h-full shrink-0 min-h-0 min-w-0 z-20">
         
         {/* Table Header */}
-        <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shrink-0 z-20">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-[#e02424] rounded-xl flex items-center justify-center text-white shadow-md shadow-red-200">
-              <span className="text-base font-black">{tableDisplayNum}</span>
+        <div className="px-3.5 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between shrink-0 min-w-0 z-20">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="w-9 h-9 bg-[#e02424] rounded-xl flex items-center justify-center text-white shadow-md shadow-red-200 shrink-0">
+              <span className="text-sm font-black">{tableDisplayNum}</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-black text-slate-900 tracking-tight leading-tight">Order Details</h2>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h2 className="text-sm font-black text-slate-900 tracking-tight leading-tight truncate">Order Details</h2>
                 {cart.items.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-50 text-[#e02424] border border-red-100">
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-red-50 text-[#e02424] border border-red-100 shrink-0">
                     {cart.items.reduce((acc, i) => acc + (i.quantity || 1), 0)} items
                   </span>
                 )}
               </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
                 {areaDisplayName}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 shrink-0">
             {table?.availabilityStatus === "OCCUPIED" && (
               <button
                 type="button"
                 onClick={handleReleaseTable}
-                className="px-2.5 py-1 text-[10px] font-bold uppercase rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
+                className="px-2 py-1 text-[9px] font-bold uppercase rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
                 title="Mark this table as available and clear cart"
               >
-                Release Table
+                Release
               </button>
             )}
             <button
@@ -900,11 +988,11 @@ function MenusContent() {
         </div>
 
         {/* Order Items List - High Visibility Compact POS Rows */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-50">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-50 min-w-0">
           {cart.items.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-400 p-6 text-center">
-              <div className="bg-slate-50 p-5 rounded-full mb-3 text-slate-400">
-                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <div className="bg-slate-50 p-4 rounded-full mb-2 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
                   <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
                 </svg>
@@ -916,7 +1004,7 @@ function MenusContent() {
               <button
                 type="button"
                 onClick={() => navigateToTables()}
-                className="mt-4 px-4 py-2 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95"
+                className="mt-3 px-3 py-1.5 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95"
               >
                 <FiArrowLeft size={13} /> Return to Floors & Tables
               </button>
@@ -930,7 +1018,7 @@ function MenusContent() {
               return (
                 <div
                   key={itemId}
-                  className={`py-2 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2.5 ${
+                  className={`py-2 px-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 min-w-0 ${
                     isOrdered
                       ? "bg-slate-50/80 border-slate-200/80 opacity-90"
                       : "bg-white border-slate-200/70 hover:border-red-200 hover:shadow-xs"
@@ -946,12 +1034,12 @@ function MenusContent() {
                         ₹{Number(item.price).toFixed(2)}
                       </span>
                       {item.isManual && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
+                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-bold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
                           Manual
                         </span>
                       )}
                       {isOrdered && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
                           {item.kitchenStatus}
                         </span>
                       )}
@@ -959,7 +1047,7 @@ function MenusContent() {
                   </div>
 
                   {/* Right: Stepper, Item Total, and Remove */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                     {/* Stepper */}
                     <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200/80">
                       <button
@@ -968,7 +1056,7 @@ function MenusContent() {
                         className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
                         title="Decrease"
                       >
-                        <FiMinus size={11} />
+                        <FiMinus size={10} />
                       </button>
                       <span className="w-5 text-center font-black text-slate-900 text-xs">{item.quantity}</span>
                       <button
@@ -977,12 +1065,12 @@ function MenusContent() {
                         className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
                         title="Increase"
                       >
-                        <FiPlus size={11} />
+                        <FiPlus size={10} />
                       </button>
                     </div>
 
                     {/* Total for item */}
-                    <div className="w-14 text-right">
+                    <div className="w-12 text-right">
                       <span className="font-bold text-slate-900 text-xs sm:text-[13px]">₹{itemTotal}</span>
                     </div>
 
@@ -993,7 +1081,7 @@ function MenusContent() {
                       className="text-slate-300 hover:text-red-500 transition-colors p-1 active:scale-90 cursor-pointer"
                       title="Remove Item"
                     >
-                      <FiTrash2 size={14} />
+                      <FiTrash2 size={13} />
                     </button>
                   </div>
                 </div>
@@ -1003,19 +1091,19 @@ function MenusContent() {
         </div>
 
         {/* Billing Section (Streamlined & Compact POS Footer) */}
-        <div className="border-t border-slate-200 bg-white px-4 py-3 shrink-0 shadow-lg space-y-2 z-10">
+        <div className="border-t border-slate-200 bg-white px-3.5 py-2.5 shrink-0 shadow-lg space-y-1.5 z-10 min-w-0">
           {/* Subtotal & Taxes breakdown */}
-          <div className="space-y-1.5 text-xs">
+          <div className="space-y-1 text-xs">
             <div className="flex items-center justify-between text-slate-600">
               <span className="font-bold text-[11px] uppercase tracking-wider text-slate-400">Subtotal</span>
-              <span className="font-black text-slate-900 text-sm">
+              <span className="font-black text-slate-900 text-xs sm:text-sm">
                 ₹{(cart.subtotal || 0).toFixed(2)}
               </span>
             </div>
 
             {/* GST 5% Toggle Switch inline */}
             <div className="flex items-center justify-between py-0.5">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Apply GST (5%)</span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -1024,7 +1112,7 @@ function MenusContent() {
                     onChange={handleToggleGst}
                     className="sr-only peer"
                   />
-                  <div className="w-8 h-4 bg-slate-200 rounded-full peer peer-checked:bg-[#e02424] transition-all after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-4 shadow-inner" />
+                  <div className="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:bg-[#e02424] transition-all after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-3 shadow-inner" />
                 </label>
               </div>
               <span className="font-bold text-slate-700 text-xs">
@@ -1034,26 +1122,26 @@ function MenusContent() {
 
             <div className="flex items-center justify-between text-slate-500 text-xs">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Service Charge</span>
-              <span className="font-bold text-slate-800">₹{(cart.serviceCharge || 0).toFixed(2)}</span>
+              <span className="font-bold text-slate-800 text-xs">₹{(cart.serviceCharge || 0).toFixed(2)}</span>
             </div>
           </div>
 
           {/* Total Amount Payable */}
-          <div className="pt-2 border-t border-dashed border-slate-200 flex items-center justify-between">
+          <div className="pt-1.5 border-t border-dashed border-slate-200 flex items-center justify-between">
             <span className="text-xs font-black text-slate-500 uppercase tracking-wider">
               Total Payable
             </span>
-            <span className="text-2xl font-black text-[#e02424] tracking-tight">
+            <span className="text-xl sm:text-2xl font-black text-[#e02424] tracking-tight">
               ₹{(cart.totalAmount || 0).toFixed(2)}
             </span>
           </div>
 
           {/* Live Kitchen Status Banner (if order is active in kitchen) */}
           {cart.status && cart.status !== "PENDING" && cart.status !== "COMPLETED" && cart.items.length > 0 && (
-            <div className="rounded-xl px-3 py-2 bg-slate-900 text-white flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2">
+            <div className="rounded-xl px-2.5 py-1.5 bg-slate-900 text-white flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <div
-                  className={`w-2 h-2 rounded-full ${
+                  className={`w-2 h-2 rounded-full shrink-0 ${
                     cart.status === "READY"
                       ? "bg-emerald-400 animate-bounce"
                       : cart.status === "PREPARING"
@@ -1072,7 +1160,7 @@ function MenusContent() {
 
               <Link
                 href="/user-dashboard/kitchen"
-                className="rounded-lg bg-white/10 hover:bg-white/20 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-white transition flex items-center gap-1 cursor-pointer shrink-0"
+                className="rounded-lg bg-white/10 hover:bg-white/20 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white transition flex items-center gap-1 cursor-pointer shrink-0 ml-1"
               >
                 <span>KDS</span>
                 <FiArrowRight size={10} />
@@ -1093,7 +1181,7 @@ function MenusContent() {
                 {sendingKot
                   ? "Sending to Kitchen..."
                   : cart.status === "ORDERED" || cart.status === "PREPARING" || cart.status === "READY"
-                  ? "Send New Items to Kitchen (KOT) ➔"
+                  ? "Send New Items to Kitchen ➔"
                   : "Order & Send to Kitchen (KOT) ➔"}
               </button>
             ) : null}
@@ -1103,7 +1191,7 @@ function MenusContent() {
                 type="button"
                 onClick={() => setShowBillModal(true)}
                 disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-800 py-2.5 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all flex items-center justify-center cursor-pointer disabled:opacity-40"
+                className="bg-slate-100 hover:bg-slate-200 text-slate-800 py-2 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all flex items-center justify-center cursor-pointer disabled:opacity-40"
               >
                 <FiPrinter className="mr-1.5 text-xs" />
                 Bill
@@ -1113,7 +1201,7 @@ function MenusContent() {
                 type="button"
                 onClick={() => setShowPaymentModal(true)}
                 disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all shadow-md shadow-emerald-600/20 active:scale-95 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all shadow-md shadow-emerald-600/20 active:scale-95 disabled:opacity-40 flex items-center justify-center cursor-pointer"
               >
                 <FiCheckCircle className="mr-1.5 text-xs" />
                 Pay
