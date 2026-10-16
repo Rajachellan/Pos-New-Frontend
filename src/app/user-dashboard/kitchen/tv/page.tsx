@@ -267,55 +267,26 @@ export default function KitchenTvDisplayPage() {
       }
 
       // Visual notification
-      const label = data.roomNumber
+      const label = data.orderType === "TAKEAWAY"
+        ? "TAKEAWAY"
+        : data.roomNumber
         ? `ROOM ${data.roomNumber}`
-        : data.tableNumber
+        : data.tableNumber && data.tableNumber !== "NA"
         ? `TABLE T${data.tableNumber}`
         : data.orderType || "NEW ORDER";
       setRecentNotification(`🔔 NEW KOT: ${data.orderNumber || "Order"} (${label})`);
       setTimeout(() => setRecentNotification(null), 6000);
 
-      // Add to orders without duplication
-      setOrders((prev) => {
-        const exists = prev.some((o) => o._id === data.orderId);
-        if (exists) {
-          return prev.map((o) =>
-            o._id === data.orderId
-              ? {
-                  ...o,
-                  items: data.items,
-                  kitchenStatus: "NEW",
-                  status: "ORDERED",
-                }
-              : o
-          );
-        }
-
-        const newOrder: KdsOrder = {
-          _id: data.orderId,
-          orderNumber: data.orderNumber || `#${data.orderId.slice(-4).toUpperCase()}`,
-          orderType: data.orderType || "DINE-IN",
-          tableId: {
-            _id: "tbl",
-            tableNumber: data.tableNumber || "NA",
-          },
-          roomNumber: data.roomNumber,
-          items: data.items || [],
-          notes: data.notes,
-          status: "ORDERED",
-          kitchenStatus: "NEW",
-          branchId: data.branchId,
-          createdAt: data.createdAt || new Date().toISOString(),
-        };
-
-        return [...prev, newOrder];
-      });
+      // Re-fetch orders immediately to ensure synchronized data
+      fetchKitchenOrders(selectedBranchId);
     };
 
     // Order Updated event
     const handleOrderUpdated = (data: {
       orderId: string;
       branchId?: string;
+      orderNumber?: string;
+      orderType?: string;
       status: string;
       kitchenStatus?: KitchenStatus;
       startedAt?: string;
@@ -325,51 +296,21 @@ export default function KitchenTvDisplayPage() {
       console.log("[KDS Socket] Order updated:", data);
 
       if (data.status === "CANCELLED") {
-        setRecentNotification(`⚠ Order #${data.orderId.slice(-4).toUpperCase()} cancelled`);
+        setRecentNotification(`⚠ Order #${(data.orderNumber || data.orderId || "").slice(-4).toUpperCase()} cancelled`);
         setTimeout(() => setRecentNotification(null), 5000);
       }
 
-      setOrders((prev) => {
-        // If served, completed, or cancelled, remove from KDS
-        if (
-          data.kitchenStatus === "SERVED" ||
-          data.status === "COMPLETED" ||
-          data.status === "CANCELLED"
-        ) {
-          return prev.filter((o) => o._id !== data.orderId);
-        }
-
-        return prev.map((o) => {
-          if (o._id === data.orderId) {
-            let nextKStatus: KitchenStatus = o.kitchenStatus;
-            if (data.kitchenStatus) {
-              nextKStatus = data.kitchenStatus;
-            } else if (data.status === "PREPARING") {
-              nextKStatus = "PREPARING";
-            } else if (data.status === "READY") {
-              nextKStatus = "READY";
-            }
-
-            return {
-              ...o,
-              status: data.status,
-              kitchenStatus: nextKStatus,
-              startedAt: data.startedAt || o.startedAt,
-              readyAt: data.readyAt || o.readyAt,
-              servedAt: data.servedAt || o.servedAt,
-            };
-          }
-          return o;
-        });
-      });
+      // Refresh live orders across all three columns
+      fetchKitchenOrders(selectedBranchId);
     };
 
     socket.on("kot_received", handleKotReceived);
     socket.on("order_updated", handleOrderUpdated);
 
+    // 4-second polling fallback so unattended TV displays never miss an order
     const pollTimer = setInterval(() => {
       fetchKitchenOrders(selectedBranchId);
-    }, 6000);
+    }, 4000);
 
     return () => {
       socket.off("connect", handleConnect);
@@ -847,6 +788,12 @@ function KdsOrderCard({
 
   // Resolve Location Label
   const locationLabel = useMemo(() => {
+    if (order.orderType === "TAKEAWAY") {
+      return "TAKEAWAY";
+    }
+    if (order.orderType === "DELIVERY") {
+      return "DELIVERY";
+    }
     if (order.roomNumber) {
       return `ROOM ${order.roomNumber}`;
     }
@@ -854,15 +801,12 @@ function KdsOrderCard({
       return `ROOM ${order.roomNumber || "SRV"}`;
     }
     if (order.tableId) {
-      if (typeof order.tableId === "object" && order.tableId.tableNumber) {
+      if (typeof order.tableId === "object" && order.tableId.tableNumber && order.tableId.tableNumber !== "NA") {
         return `TABLE T${order.tableId.tableNumber}`;
       }
-    }
-    if (order.orderType === "TAKEAWAY") {
-      return "TAKEAWAY";
-    }
-    if (order.orderType === "DELIVERY") {
-      return "DELIVERY";
+      if (typeof order.tableId === "string") {
+        return `TABLE ${order.tableId.slice(-4).toUpperCase()}`;
+      }
     }
     return "TABLE DINE-IN";
   }, [order.roomNumber, order.orderType, order.tableId]);

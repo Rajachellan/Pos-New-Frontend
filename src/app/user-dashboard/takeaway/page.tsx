@@ -127,6 +127,25 @@ export default function TakeawayPage() {
     }
   }
 
+  // Auto-resolve branch context
+  useEffect(() => {
+    async function initBranches() {
+      try {
+        const res = await api.get("/get/branch/role");
+        const list = res.data?.data || [];
+        const stored = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
+        if (list.length === 1) {
+          localStorage.setItem("pos_selected_branch", list[0]._id);
+        } else if ((!stored || stored === "ALL") && list.length > 0) {
+          localStorage.setItem("pos_selected_branch", list[0]._id);
+        }
+      } catch (err) {
+        console.warn("Could not auto-resolve branch:", err);
+      }
+    }
+    initBranches();
+  }, []);
+
   useEffect(() => {
     fetchOrders();
     fetchMenuItems();
