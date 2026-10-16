@@ -45,6 +45,11 @@ export default function MenuManagementPage() {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // Category Edit / Delete state
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editCategoryName, setEditCategoryName] = useState("");
+  const [deleteCategoryData, setDeleteCategoryData] = useState<{ name: string; count: number } | null>(null);
+
   // Form states for Add/Edit
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [itemName, setItemName] = useState("");
@@ -345,19 +350,68 @@ export default function MenuManagementPage() {
     }
   };
 
-  const handleDeleteCategory = async (catName: string, e: React.MouseEvent) => {
+  const handleOpenEditCategory = (cat: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`Are you sure you want to delete category "${catName}"?`)) return;
+    setEditingCategory(cat);
+    setEditCategoryName(cat);
+  };
+
+  const handleUpdateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCategory || !editCategoryName.trim()) return;
+
+    const trimmedUpper = editCategoryName.trim().toUpperCase();
+    if (trimmedUpper === editingCategory.toUpperCase().trim()) {
+      setEditingCategory(null);
+      return;
+    }
+
     try {
-      const res = await api.delete(`/category/${encodeURIComponent(catName)}`);
+      setIsSubmitting(true);
+      const res = await api.put(`/category/${encodeURIComponent(editingCategory)}`, {
+        name: trimmedUpper,
+      });
+
       if (res.data?.success) {
-        showToast(`Category "${catName}" removed.`);
-        if (selectedCategory === catName) setSelectedCategory("ALL");
+        showToast(`Category renamed to "${trimmedUpper}".`);
+        if (selectedCategory.toUpperCase().trim() === editingCategory.toUpperCase().trim()) {
+          setSelectedCategory(trimmedUpper);
+        }
+        setEditingCategory(null);
         await fetchCategories();
         await fetchMenuItems();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || "Failed to remove category");
+      alert(err.response?.data?.message || "Failed to update category");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeleteCategory = async (deleteDishes: boolean) => {
+    if (!deleteCategoryData) return;
+    const catName = deleteCategoryData.name;
+
+    try {
+      setIsSubmitting(true);
+      const res = await api.delete(`/category/${encodeURIComponent(catName)}?deleteDishes=${deleteDishes}`);
+      if (res.data?.success) {
+        showToast(
+          deleteDishes
+            ? `Category "${catName}" and ${res.data.deletedDishesCount || 0} dishes removed.`
+            : `Category "${catName}" removed.`
+        );
+        if (selectedCategory.toUpperCase().trim() === catName.toUpperCase().trim()) {
+          setSelectedCategory("ALL");
+        }
+        setDeleteCategoryData(null);
+        await fetchCategories();
+        await fetchMenuItems();
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to delete category");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -467,8 +521,8 @@ export default function MenuManagementPage() {
                           : "text-gray-700 hover:bg-gray-100"
                       }`}
                     >
-                      <span className="truncate">{cat}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="truncate flex-1 pr-1">{cat}</span>
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         <span
                           className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                             isSelected
@@ -478,20 +532,37 @@ export default function MenuManagementPage() {
                         >
                           {count}
                         </span>
-                        {count === 0 && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteCategory(cat, e)}
-                            className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition ${
-                              isSelected
-                                ? "hover:bg-white/20 text-white"
-                                : "hover:bg-red-50 text-red-500"
-                            }`}
-                            title="Delete Unused Category"
-                          >
-                            <FiTrash2 size={12} />
-                          </button>
-                        )}
+
+                        {/* Edit Category Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenEditCategory(cat, e)}
+                          className={`p-1.5 rounded-lg transition cursor-pointer ${
+                            isSelected
+                              ? "text-white/80 hover:text-white hover:bg-white/20"
+                              : "text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                          }`}
+                          title={`Edit "${cat}" Category`}
+                        >
+                          <FiEdit2 size={13} />
+                        </button>
+
+                        {/* Delete Category Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteCategoryData({ name: cat, count });
+                          }}
+                          className={`p-1.5 rounded-lg transition cursor-pointer ${
+                            isSelected
+                              ? "text-white/80 hover:text-white hover:bg-white/20"
+                              : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                          }`}
+                          title={`Delete "${cat}" Category`}
+                        >
+                          <FiTrash2 size={13} />
+                        </button>
                       </div>
                     </div>
                   );
@@ -1266,6 +1337,142 @@ export default function MenuManagementPage() {
                   className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
                 >
                   Yes, Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* EDIT CATEGORY MODAL */}
+      <AnimatePresence>
+        {editingCategory && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl border border-gray-100 space-y-4"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-gray-900">
+                    Edit Category
+                  </h3>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">
+                    Rename Category
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingCategory(null)}
+                  className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer"
+                >
+                  <FiX size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateCategory} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    Category Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={editCategoryName}
+                    onChange={(e) => setEditCategoryName(e.target.value.toUpperCase())}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#e02424]/20 focus:border-[#e02424]"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1.5 leading-normal">
+                    Renaming will automatically update all dishes linked to this category.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCategory(null)}
+                    className="px-3.5 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !editCategoryName.trim()}
+                    className="px-4 py-2 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmitting ? "Saving..." : "Save Changes"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DELETE CATEGORY CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {deleteCategoryData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl border border-gray-100 space-y-4"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-red-100 text-[#e02424] flex items-center justify-center mx-auto text-xl">
+                <FiTrash2 />
+              </div>
+              <div className="text-center">
+                <h3 className="text-lg font-black text-gray-900">
+                  Delete Category: {deleteCategoryData.name}?
+                </h3>
+                {deleteCategoryData.count > 0 ? (
+                  <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 text-left">
+                    <p className="font-bold">
+                      ⚠️ This category currently contains {deleteCategoryData.count} food dish(es).
+                    </p>
+                    <p className="mt-1 text-[11px] text-amber-600">
+                      Do you want to delete only the category or delete the category along with all its dishes?
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">
+                    This category has 0 dishes. Are you sure you want to remove it?
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteCategoryData(null)}
+                  className="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                {deleteCategoryData.count > 0 && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => handleConfirmDeleteCategory(false)}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+                    title="Remove category only and keep dishes"
+                  >
+                    Delete Category Only
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => handleConfirmDeleteCategory(deleteCategoryData.count > 0)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-[#e02424] hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {deleteCategoryData.count > 0 ? "Delete Category & Dishes" : "Yes, Delete Category"}
                 </button>
               </div>
             </motion.div>

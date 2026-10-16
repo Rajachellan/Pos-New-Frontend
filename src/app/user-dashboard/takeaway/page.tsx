@@ -71,8 +71,9 @@ export default function TakeawayPage() {
   const [orders, setOrders] = useState<TakeawayOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "READY" | "PREPARING" | "COMPLETED" | "ALL">("ACTIVE");
+  const [statusFilter, setStatusFilter] = useState<"PREPARING" | "READY" | "ACTIVE" | "COMPLETED" | "ALL">("PREPARING");
   const [searchQuery, setSearchQuery] = useState("");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // New Order POS State
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
@@ -152,11 +153,37 @@ export default function TakeawayPage() {
 
   // Update Status of Order (e.g. Mark Ready)
   async function handleUpdateStatus(orderId: string, newStatus: "PREPARING" | "READY" | "SERVED") {
+    const targetOrder = orders.find((o) => o._id === orderId);
+
+    // Optimistically update React state immediately
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (o._id === orderId) {
+          const updatedStatus = newStatus === "SERVED" ? "COMPLETED" : newStatus === "READY" ? "READY" : o.status;
+          return {
+            ...o,
+            kitchenStatus: newStatus,
+            status: updatedStatus,
+          };
+        }
+        return o;
+      })
+    );
+
+    if (newStatus === "READY") {
+      setToastMessage(`Order ${targetOrder?.orderNumber || ""} marked Ready! Moved to "Ready for Pickup".`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } else if (newStatus === "SERVED") {
+      setToastMessage(`Order ${targetOrder?.orderNumber || ""} handed over! Moved to "Completed Today".`);
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+
     try {
       await api.patch(`/kitchen/orders/${orderId}/status`, { status: newStatus });
       fetchOrders(true);
     } catch (err) {
       console.error("Failed to update order status", err);
+      fetchOrders(true);
     }
   }
 
@@ -221,11 +248,6 @@ export default function TakeawayPage() {
   // Submit New Takeaway Order
   async function handleCreateOrder(e: React.FormEvent) {
     e.preventDefault();
-    if (!customerName.trim()) {
-      setFormError("Customer Name is compulsory for takeaway orders. Please enter customer name.");
-      customerNameInputRef.current?.focus();
-      return;
-    }
     if (cartItems.length === 0) {
       setFormError("Please add at least one item to the takeaway order.");
       return;
@@ -318,11 +340,11 @@ export default function TakeawayPage() {
     return orders.filter((o) => {
       // Status filtering
       if (statusFilter === "ACTIVE") {
-        if (o.status === "COMPLETED" || o.status === "CANCELLED") return false;
+        if (o.status === "COMPLETED" || o.status === "CANCELLED" || o.kitchenStatus === "SERVED") return false;
       } else if (statusFilter === "READY") {
-        if (o.kitchenStatus !== "READY" || o.status === "COMPLETED") return false;
+        if (o.kitchenStatus !== "READY" || o.status === "COMPLETED" || o.status === "CANCELLED") return false;
       } else if (statusFilter === "PREPARING") {
-        if (o.kitchenStatus === "READY" || o.status === "COMPLETED" || o.status === "CANCELLED") return false;
+        if (o.kitchenStatus === "READY" || o.kitchenStatus === "SERVED" || o.status === "COMPLETED" || o.status === "CANCELLED") return false;
       } else if (statusFilter === "COMPLETED") {
         if (o.status !== "COMPLETED") return false;
       }
@@ -352,13 +374,24 @@ export default function TakeawayPage() {
     return orders.filter((o) => new Date(o.createdAt) >= todayStart);
   }, [orders, todayStart]);
 
-  const activeCount = useMemo(() => {
-    return orders.filter((o) => ["ORDERED", "PREPARING", "READY"].includes(o.status)).length;
+  const inKitchenCount = useMemo(() => {
+    return orders.filter(
+      (o) =>
+        (o.status === "ORDERED" || o.status === "PREPARING" || !o.kitchenStatus || o.kitchenStatus === "PREPARING" || o.kitchenStatus === "NEW") &&
+        o.kitchenStatus !== "READY" &&
+        o.kitchenStatus !== "SERVED" &&
+        o.status !== "COMPLETED" &&
+        o.status !== "CANCELLED"
+    ).length;
   }, [orders]);
 
   const readyCount = useMemo(() => {
-    return orders.filter((o) => o.kitchenStatus === "READY" && o.status !== "COMPLETED").length;
+    return orders.filter((o) => o.kitchenStatus === "READY" && o.status !== "COMPLETED" && o.status !== "CANCELLED").length;
   }, [orders]);
+
+  const activeCount = useMemo(() => {
+    return inKitchenCount + readyCount;
+  }, [inKitchenCount, readyCount]);
 
   const todaySales = useMemo(() => {
     return todayOrders
@@ -437,6 +470,167 @@ export default function TakeawayPage() {
   const vegDishes = useMemo(() => filteredMenuItems.filter((m) => isDishVeg(m)), [filteredMenuItems]);
   const nonVegDishes = useMemo(() => filteredMenuItems.filter((m) => !isDishVeg(m)), [filteredMenuItems]);
 
+  function renderOrderCard(order: TakeawayOrder) {
+    const isReady = order.kitchenStatus === "READY";
+    const isCompleted = order.status === "COMPLETED";
+    const isPreparing = !isReady && !isCompleted;
+    const isPaid = Boolean(order.paymentMethod);
+
+    return (
+      <div
+        key={order._id}
+        className={`flex flex-col justify-between rounded-2xl p-4 sm:p-5 border transition-all duration-200 shadow-xs hover:shadow-md ${
+          isReady
+            ? "bg-emerald-50/40 border-emerald-300 hover:border-emerald-400"
+            : isPreparing
+            ? "bg-amber-50/30 border-amber-300 hover:border-amber-400"
+            : "bg-white border-slate-200"
+        }`}
+      >
+        <div>
+          {/* Top Bar with Token & Badges */}
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white font-black text-sm tracking-wide shadow-xs">
+                {order.orderNumber || "#TK"}
+              </span>
+              {isReady ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  Ready for Pickup
+                </span>
+              ) : isPreparing ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  In Kitchen
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-300">
+                  Handed Over
+                </span>
+              )}
+            </div>
+
+            <div className="text-right">
+              <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1 justify-end">
+                <FiClock size={11} />
+                {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          </div>
+
+          {/* Customer Info */}
+          {(order.customerName || order.customerPhone) && (
+            <div className="mb-2.5 pb-2.5 border-b border-slate-200/80 flex items-center justify-between text-xs text-slate-700">
+              <div className="flex items-center gap-1.5 truncate">
+                <FiUser size={13} className="text-slate-400 shrink-0" />
+                <span className="font-bold truncate">{order.customerName || "Walk-in Guest"}</span>
+              </div>
+              {order.customerPhone && (
+                <a
+                  href={`tel:${order.customerPhone}`}
+                  className="flex items-center gap-1 text-slate-500 hover:text-amber-600 shrink-0 font-medium"
+                >
+                  <FiPhone size={12} />
+                  <span>{order.customerPhone}</span>
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Items List */}
+          <div className="space-y-1.5 my-3 max-h-36 overflow-y-auto scrollbar-none pr-1">
+            {order.items.map((item, idx) => (
+              <div key={idx} className="flex items-center justify-between text-xs text-slate-800">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-bold text-amber-600 w-5 text-right">{item.quantity}x</span>
+                  <span className="truncate">{item.name}</span>
+                </div>
+                <span className="font-medium text-slate-500 shrink-0">₹{item.price * item.quantity}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Packaging Notes */}
+          {order.notes && (
+            <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-amber-100/60 border border-amber-200/60 text-[11px] text-amber-900">
+              <span className="font-bold">Packing: </span>
+              {order.notes}
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Card Footer */}
+        <div className="pt-3 border-t border-slate-200/80 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Total</span>
+              <p className="text-base font-black text-slate-900 leading-none mt-0.5">
+                ₹{order.totalAmount?.toFixed(2)}
+              </p>
+            </div>
+
+            <div>
+              <span
+                className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                  isPaid
+                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                    : "bg-rose-100 text-rose-800 border border-rose-300"
+                }`}
+              >
+                {isPaid ? `Paid (${order.paymentMethod})` : "Unpaid (Due)"}
+              </span>
+            </div>
+          </div>
+
+          {/* Actions Bar */}
+          <div className="flex items-center gap-1.5 pt-1">
+            {isPreparing && (
+              <button
+                onClick={() => handleUpdateStatus(order._id, "READY")}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
+              >
+                <FiCheckCircle size={14} />
+                <span>Mark Ready</span>
+              </button>
+            )}
+
+            {isReady && !isPaid && (
+              <button
+                onClick={() => {
+                  setSettleOrder(order);
+                  setSettlePaymentMethod("CASH");
+                }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
+              >
+                <FiDollarSign size={14} />
+                <span>Pay & Handover</span>
+              </button>
+            )}
+
+            {isReady && isPaid && (
+              <button
+                onClick={() => handleUpdateStatus(order._id, "SERVED")}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
+              >
+                <FiCheck size={14} />
+                <span>Hand Over</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => handlePrintReceipt(order)}
+              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shrink-0"
+              title="Print Parcel Slip / Receipt"
+            >
+              <FiPrinter size={15} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       {/* Top Header & New Order Action */}
@@ -479,17 +673,31 @@ export default function TakeawayPage() {
 
       {/* KPI Stats Bar */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+        <div
+          onClick={() => setStatusFilter("PREPARING")}
+          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+            statusFilter === "PREPARING"
+              ? "border-amber-400 ring-2 ring-amber-400/20 shadow-sm"
+              : "border-slate-200/80 shadow-xs hover:border-amber-300"
+          } flex items-center gap-3.5`}
+        >
           <div className="w-11 h-11 rounded-xl bg-amber-50 border border-amber-200/60 text-amber-600 flex items-center justify-center shrink-0">
-            <FiShoppingBag size={22} />
+            <RiFireLine size={22} />
           </div>
           <div>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Active Orders</p>
-            <p className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">{activeCount}</p>
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">In Kitchen</p>
+            <p className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">{inKitchenCount}</p>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+        <div
+          onClick={() => setStatusFilter("READY")}
+          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+            statusFilter === "READY"
+              ? "border-emerald-400 ring-2 ring-emerald-400/20 shadow-sm"
+              : "border-slate-200/80 shadow-xs hover:border-emerald-300"
+          } flex items-center gap-3.5`}
+        >
           <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-200/60 text-emerald-600 flex items-center justify-center shrink-0">
             <FiCheckCircle size={22} />
           </div>
@@ -499,7 +707,14 @@ export default function TakeawayPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+        <div
+          onClick={() => setStatusFilter("COMPLETED")}
+          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+            statusFilter === "COMPLETED"
+              ? "border-blue-400 ring-2 ring-blue-400/20 shadow-sm"
+              : "border-slate-200/80 shadow-xs hover:border-blue-300"
+          } flex items-center gap-3.5`}
+        >
           <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200/60 text-blue-600 flex items-center justify-center shrink-0">
             <FiDollarSign size={22} />
           </div>
@@ -511,7 +726,14 @@ export default function TakeawayPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+        <div
+          onClick={() => setStatusFilter("ALL")}
+          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+            statusFilter === "ALL"
+              ? "border-purple-400 ring-2 ring-purple-400/20 shadow-sm"
+              : "border-slate-200/80 shadow-xs hover:border-purple-300"
+          } flex items-center gap-3.5`}
+        >
           <div className="w-11 h-11 rounded-xl bg-purple-50 border border-purple-200/60 text-purple-600 flex items-center justify-center shrink-0">
             <FiTag size={22} />
           </div>
@@ -527,14 +749,14 @@ export default function TakeawayPage() {
         {/* Status Filter Tabs */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
           <button
-            onClick={() => setStatusFilter("ACTIVE")}
+            onClick={() => setStatusFilter("PREPARING")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "ACTIVE"
-                ? "bg-slate-900 text-white shadow-xs"
+              statusFilter === "PREPARING"
+                ? "bg-amber-600 text-white shadow-xs"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            Active Pipeline ({activeCount})
+            In Kitchen ({inKitchenCount})
           </button>
           <button
             onClick={() => setStatusFilter("READY")}
@@ -547,14 +769,14 @@ export default function TakeawayPage() {
             Ready for Pickup ({readyCount})
           </button>
           <button
-            onClick={() => setStatusFilter("PREPARING")}
+            onClick={() => setStatusFilter("ACTIVE")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "PREPARING"
-                ? "bg-amber-600 text-white shadow-xs"
+              statusFilter === "ACTIVE"
+                ? "bg-slate-900 text-white shadow-xs"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            In Kitchen ({Math.max(0, activeCount - readyCount)})
+            Active Pipeline ({activeCount})
           </button>
           <button
             onClick={() => setStatusFilter("COMPLETED")}
@@ -605,171 +827,104 @@ export default function TakeawayPage() {
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
             {searchQuery
               ? `No takeaway orders matched "${searchQuery}".`
+              : statusFilter === "PREPARING"
+              ? "All caught up! No pending takeaway orders in kitchen."
+              : statusFilter === "READY"
+              ? "No orders currently waiting for customer pickup."
               : "Click the 'New Takeaway Order' button above to place a parcel ticket."}
           </p>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredOrders.map((order) => {
-            const isReady = order.kitchenStatus === "READY";
-            const isCompleted = order.status === "COMPLETED";
-            const isPreparing = !isReady && !isCompleted;
-            const isPaid = Boolean(order.paymentMethod);
+      ) : statusFilter === "ACTIVE" ? (
+        /* Segmented Active Pipeline: separates orders being cooked from orders ready for collection */
+        <div className="space-y-6">
+          {(() => {
+            const inKitchenOrders = filteredOrders.filter(
+              (o) => o.kitchenStatus !== "READY" && o.status !== "COMPLETED"
+            );
+            const readyOrders = filteredOrders.filter(
+              (o) => o.kitchenStatus === "READY" && o.status !== "COMPLETED"
+            );
 
             return (
-              <div
-                key={order._id}
-                className={`flex flex-col justify-between rounded-2xl p-4 sm:p-5 border transition-all duration-200 shadow-xs hover:shadow-md ${
-                  isReady
-                    ? "bg-emerald-50/40 border-emerald-300 hover:border-emerald-400"
-                    : isPreparing
-                    ? "bg-amber-50/30 border-amber-300 hover:border-amber-400"
-                    : "bg-white border-slate-200"
-                }`}
-              >
-                <div>
-                  {/* Top Bar with Token & Badges */}
-                  <div className="flex items-start justify-between gap-2 mb-3">
+              <>
+                {/* Section 1: In Kitchen */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white font-black text-sm tracking-wide shadow-xs">
-                        {order.orderNumber || "#TK"}
-                      </span>
-                      {isReady ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-300">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                          Ready for Pickup
-                        </span>
-                      ) : isPreparing ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                          In Kitchen
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-300">
-                          Handed Over
-                        </span>
-                      )}
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                      <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wider">
+                        In Kitchen & Preparing ({inKitchenOrders.length})
+                      </h3>
                     </div>
-
-                    <div className="text-right">
-                      <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1 justify-end">
-                        <FiClock size={11} />
-                        {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    </div>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      Click &quot;Mark Ready&quot; when dish is packed
+                    </span>
                   </div>
 
-                  {/* Customer Info */}
-                  {(order.customerName || order.customerPhone) && (
-                    <div className="mb-2.5 pb-2.5 border-b border-slate-200/80 flex items-center justify-between text-xs text-slate-700">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <FiUser size={13} className="text-slate-400 shrink-0" />
-                        <span className="font-bold truncate">{order.customerName || "Walk-in Guest"}</span>
-                      </div>
-                      {order.customerPhone && (
-                        <a
-                          href={`tel:${order.customerPhone}`}
-                          className="flex items-center gap-1 text-slate-500 hover:text-amber-600 shrink-0 font-medium"
-                        >
-                          <FiPhone size={12} />
-                          <span>{order.customerPhone}</span>
-                        </a>
-                      )}
+                  {inKitchenOrders.length === 0 ? (
+                    <div className="p-5 rounded-2xl bg-amber-50/40 border border-amber-200/60 text-xs text-amber-900 font-medium text-center">
+                      No takeaway orders currently in kitchen. All dishes are packed!
                     </div>
-                  )}
-
-                  {/* Items List */}
-                  <div className="space-y-1.5 my-3 max-h-36 overflow-y-auto scrollbar-none pr-1">
-                    {order.items.map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs text-slate-800">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="font-bold text-amber-600 w-5 text-right">{item.quantity}x</span>
-                          <span className="truncate">{item.name}</span>
-                        </div>
-                        <span className="font-medium text-slate-500 shrink-0">₹{item.price * item.quantity}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Packaging Notes */}
-                  {order.notes && (
-                    <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-amber-100/60 border border-amber-200/60 text-[11px] text-amber-900">
-                      <span className="font-bold">Packing: </span>
-                      {order.notes}
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {inKitchenOrders.map((order) => renderOrderCard(order))}
                     </div>
                   )}
                 </div>
 
-                {/* Bottom Card Footer */}
-                <div className="pt-3 border-t border-slate-200/80 space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Total</span>
-                      <p className="text-base font-black text-slate-900 leading-none mt-0.5">
-                        ₹{order.totalAmount?.toFixed(2)}
-                      </p>
+                {/* Section 2: Ready for Pickup */}
+                <div className="space-y-3 pt-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wider">
+                        Ready for Pickup ({readyOrders.length})
+                      </h3>
                     </div>
-
-                    <div>
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                          isPaid
-                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                            : "bg-rose-100 text-rose-800 border border-rose-300"
-                        }`}
-                      >
-                        {isPaid ? `Paid (${order.paymentMethod})` : "Unpaid (Due)"}
-                      </span>
-                    </div>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      Awaiting customer arrival & handover
+                    </span>
                   </div>
 
-                  {/* Actions Bar */}
-                  <div className="flex items-center gap-1.5 pt-1">
-                    {isPreparing && (
-                      <button
-                        onClick={() => handleUpdateStatus(order._id, "READY")}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
-                      >
-                        <FiCheckCircle size={14} />
-                        <span>Mark Ready</span>
-                      </button>
-                    )}
-
-                    {isReady && !isPaid && (
-                      <button
-                        onClick={() => {
-                          setSettleOrder(order);
-                          setSettlePaymentMethod("CASH");
-                        }}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
-                      >
-                        <FiDollarSign size={14} />
-                        <span>Pay & Handover</span>
-                      </button>
-                    )}
-
-                    {isReady && isPaid && (
-                      <button
-                        onClick={() => handleUpdateStatus(order._id, "SERVED")}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
-                      >
-                        <FiCheck size={14} />
-                        <span>Hand Over</span>
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => handlePrintReceipt(order)}
-                      className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shrink-0"
-                      title="Print Parcel Slip / Receipt"
-                    >
-                      <FiPrinter size={15} />
-                    </button>
-                  </div>
+                  {readyOrders.length === 0 ? (
+                    <div className="p-5 rounded-2xl bg-emerald-50/40 border border-emerald-200/60 text-xs text-emerald-900 font-medium text-center">
+                      No ready orders waiting for pickup right now.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {readyOrders.map((order) => renderOrderCard(order))}
+                    </div>
+                  )}
                 </div>
-              </div>
+              </>
             );
-          })}
+          })()}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredOrders.map((order) => renderOrderCard(order))}
+        </div>
+      )}
+
+      {/* Realtime Toast Banner */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <FiCheckCircle className="text-emerald-400 shrink-0" size={18} />
+          <span className="text-xs font-semibold">{toastMessage}</span>
+          {statusFilter !== "READY" && toastMessage.includes("Ready") && (
+            <button
+              onClick={() => setStatusFilter("READY")}
+              className="ml-2 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition cursor-pointer"
+            >
+              View Ready ➔
+            </button>
+          )}
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-slate-400 hover:text-white p-1 rounded-lg ml-1"
+          >
+            <FiX size={14} />
+          </button>
         </div>
       )}
 
@@ -1117,34 +1272,24 @@ export default function TakeawayPage() {
                     <FiUser className="text-amber-600" />
                     Customer Details
                   </span>
-                  <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                    * Name is Compulsory
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                    Optional
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div className="relative">
-                    <FiUser
-                      className={`absolute left-3 top-1/2 -translate-y-1/2 ${
-                        !customerName.trim() && formError ? "text-rose-500" : "text-slate-400"
-                      }`}
-                      size={13}
-                    />
+                    <FiUser className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
                     <input
                       ref={customerNameInputRef}
                       type="text"
-                      placeholder="Customer Name * (Required)"
+                      placeholder="Customer Name (Optional)"
                       value={customerName}
                       onChange={(e) => {
                         setCustomerName(e.target.value);
-                        if (formError && e.target.value.trim()) setFormError("");
+                        if (formError) setFormError("");
                       }}
-                      className={`w-full pl-8 pr-2.5 py-1.5 text-xs bg-white rounded-xl border font-medium focus:outline-none transition ${
-                        !customerName.trim() && formError
-                          ? "border-rose-500 ring-2 ring-rose-200 bg-rose-50/30 text-rose-950 placeholder:text-rose-400"
-                          : "border-slate-200 focus:ring-2 focus:ring-amber-500/30 text-slate-800"
-                      }`}
+                      className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 font-medium text-slate-800"
                     />
                   </div>
                   <div className="relative">
@@ -1158,12 +1303,6 @@ export default function TakeawayPage() {
                     />
                   </div>
                 </div>
-
-                {!customerName.trim() && formError && (
-                  <p className="text-[10.5px] text-rose-600 font-bold flex items-center gap-1">
-                    <span>⚠️</span> Customer name is mandatory to identify parcel orders.
-                  </p>
-                )}
 
                 <div className="relative">
                   <FiShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />

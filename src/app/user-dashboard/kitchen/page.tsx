@@ -40,7 +40,9 @@ export interface KitchenOrder {
   _id: string
   orderNumber?: string
   orderType?: string
-  tableId: {
+  customerName?: string
+  customerPhone?: string
+  tableId?: {
     _id: string
     tableNumber: string
     areaName?: {
@@ -54,7 +56,7 @@ export interface KitchenOrder {
     }
     branch?: string
   } | string
-  branchId?: string
+  branchId?: string | { _id: string; branchName?: string; branchCode?: string }
   items: KitchenItem[]
   totalAmount: number
   status: string
@@ -79,8 +81,13 @@ const statusTabs: Array<{ value: TabStatus; label: string }> = [
 ]
 
 function getOrderBranchId(order: KitchenOrder): string | null {
-  if (order.branchId) return order.branchId.toString()
-  if (typeof order.tableId === "object") {
+  if (order.branchId) {
+    if (typeof order.branchId === "object" && (order.branchId as { _id?: string })._id) {
+      return (order.branchId as { _id: string })._id.toString()
+    }
+    return order.branchId.toString()
+  }
+  if (typeof order.tableId === "object" && order.tableId !== null) {
     if (order.tableId?.areaName?.branchName?._id) {
       return order.tableId.areaName.branchName._id.toString()
     }
@@ -178,7 +185,7 @@ export default function KitchenPage() {
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [])
+  }, [selectedBranchId])
 
   useEffect(() => {
     fetchKitchenOrders()
@@ -276,14 +283,29 @@ export default function KitchenPage() {
   }, [orders, selectedStatus])
 
   function tableLabel(order: KitchenOrder) {
+    if (order.orderType === "TAKEAWAY") {
+      return `Parcel (${order.orderNumber || "TK"})`
+    }
+    if (order.orderType === "DELIVERY") {
+      return `Delivery (${order.orderNumber || "#"})`
+    }
+    if (order.orderType === "ROOM SERVICE" || order.orderType === "ROOM-SERVICE") {
+      return `Room Service`
+    }
     if (typeof order.tableId === "string") {
       return `Table ${order.tableId.slice(-4).toUpperCase()}`
     }
-    return `Table ${order.tableId?.tableNumber || "T1"}`
+    if (order.tableId && typeof order.tableId === "object" && order.tableId.tableNumber) {
+      return `Table ${order.tableId.tableNumber}`
+    }
+    return order.orderNumber || "Order Ticket"
   }
 
   function orderBranchName(order: KitchenOrder) {
-    if (typeof order.tableId !== "string" && order.tableId?.areaName?.branchName?.branchName) {
+    if (order.branchId && typeof order.branchId === "object" && order.branchId.branchName) {
+      return order.branchId.branchName
+    }
+    if (typeof order.tableId === "object" && order.tableId?.areaName?.branchName?.branchName) {
       return order.tableId.areaName.branchName.branchName
     }
     return null

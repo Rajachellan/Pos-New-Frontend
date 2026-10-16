@@ -5,13 +5,30 @@ let currentBranchId: string | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const socketUrl =
+    let socketUrl =
       process.env.NEXT_PUBLIC_SOCKET_URL ||
       process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ||
       "http://localhost:8002";
 
+    // Auto-detect and adapt URL in the browser
+    if (typeof window !== "undefined") {
+      // 1. Avoid Mixed Content on HTTPS pages
+      if (window.location.protocol === "https:" && socketUrl.startsWith("http://")) {
+        socketUrl = socketUrl.replace(/^http:\/\//, "https://");
+      }
+      // 2. If opened from another device/LAN IP (e.g. tablet, phone), replace localhost with current host
+      if (
+        socketUrl.includes("localhost") &&
+        window.location.hostname !== "localhost" &&
+        window.location.hostname !== "127.0.0.1"
+      ) {
+        socketUrl = socketUrl.replace("localhost", window.location.hostname);
+      }
+    }
+
     socket = io(socketUrl, {
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
+      withCredentials: true,
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -33,7 +50,7 @@ export function getSocket(): Socket {
     });
 
     socket.on("connect_error", (error) => {
-      console.error("[Socket.io] Connection error:", error.message);
+      console.error(`[Socket.io] Connection error (${socketUrl}):`, error.message);
     });
   }
 

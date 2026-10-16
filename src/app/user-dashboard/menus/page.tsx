@@ -18,6 +18,7 @@ import {
   FiArrowLeft,
   FiArrowRight,
   FiClock,
+  FiLayers,
 } from "react-icons/fi"
 import { RiFireLine } from "react-icons/ri"
 import { sortTablesNaturally } from '../../utils/tableSort'
@@ -282,13 +283,31 @@ function MenusContent() {
     }
   }, [activeTableId])
 
-  // Extract Categories
+  // Extract Categories (Case-Insensitive Deduplication & Alphabetically Sorted)
   const categories = useMemo(() => {
-    const set = new Set<string>()
+    const categoryMap = new Map<string, string>()
     menuItems.forEach((item) => {
-      if (item.category) set.add(item.category.trim())
+      if (item.category && item.category.trim()) {
+        const trimmed = item.category.trim()
+        const lowerKey = trimmed.toLowerCase()
+        if (!categoryMap.has(lowerKey)) {
+          categoryMap.set(lowerKey, trimmed.toUpperCase())
+        }
+      }
     })
-    return Array.from(set)
+    return Array.from(categoryMap.values()).sort((a, b) => a.localeCompare(b))
+  }, [menuItems])
+
+  // Count items per category
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    menuItems.forEach((item) => {
+      if (item.category && item.category.trim()) {
+        const cat = item.category.trim().toLowerCase()
+        counts[cat] = (counts[cat] || 0) + 1
+      }
+    })
+    return counts
   }, [menuItems])
 
   // Helper to detect if a dish is Vegetarian or Non-Vegetarian
@@ -323,8 +342,36 @@ function MenusContent() {
     )
   }
 
+  // Handle Category Selection with automatic Diet filter resolution
+  const handleSelectCategory = (catName: string) => {
+    const target = catName.trim().toLowerCase()
+    setSelectedCategory(target)
+
+    // 1. If currently on "In Order", switch to "all" so category items show up
+    if (dietFilter === "selected") {
+      setDietFilter("all")
+    } else if (dietFilter === "veg" || dietFilter === "non_veg") {
+      // 2. If the category has NO dishes matching the active diet filter (e.g. Non-Veg category with Veg filter),
+      // auto-reset to "all" so the user can see the dishes of the category they just clicked!
+      if (target !== "all") {
+        const catDishes = menuItems.filter(
+          (m) => m.category && m.category.trim().toLowerCase() === target
+        )
+        const hasMatchingDiet = catDishes.some((m) =>
+          dietFilter === "veg" ? isDishVeg(m) : !isDishVeg(m)
+        )
+        if (!hasMatchingDiet && catDishes.length > 0) {
+          setDietFilter("all")
+        }
+      }
+    }
+  }
+
   // Filtered Menu Items
   const filteredMenuItems = useMemo(() => {
+    const selectedCategoryTrimmed = selectedCategory.trim().toLowerCase()
+    const searchTrimmed = search.trim().toLowerCase()
+
     return menuItems.filter((item) => {
       const isVeg = isDishVeg(item)
       if (dietFilter === "veg" && !isVeg) return false
@@ -337,13 +384,17 @@ function MenusContent() {
         if (!inCart) return false
       }
 
+      const itemCategoryTrimmed = item.category?.trim().toLowerCase() || ""
+
       const matchesCategory =
-        selectedCategory === "all" ||
-        item.category?.toLowerCase() === selectedCategory.toLowerCase()
+        selectedCategoryTrimmed === "all" ||
+        itemCategoryTrimmed === selectedCategoryTrimmed
+
       const matchesSearch =
-        search === "" ||
-        item.name.toLowerCase().includes(search.toLowerCase()) ||
-        item.category?.toLowerCase().includes(search.toLowerCase())
+        searchTrimmed === "" ||
+        item.name.toLowerCase().includes(searchTrimmed) ||
+        itemCategoryTrimmed.includes(searchTrimmed)
+
       return matchesCategory && matchesSearch
     })
   }, [menuItems, selectedCategory, search, dietFilter, cart.items])
@@ -755,22 +806,32 @@ function MenusContent() {
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative group">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#e02424] transition-colors">
-              <FiSearch size={16} />
+          {/* Search Bar & Diet Filters Row */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            {/* Search Bar */}
+            <div className="relative group flex-1 min-w-[200px]">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#e02424] transition-colors">
+                <FiSearch size={16} />
+              </div>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search menu items..."
+                className="block w-full pl-10 pr-8 py-2 border border-slate-200 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#e02424] focus:border-transparent transition-all text-sm font-medium text-slate-800"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-700 cursor-pointer"
+                  title="Clear search"
+                >
+                  <FiX size={15} />
+                </button>
+              )}
             </div>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search menu items..."
-              className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#e02424] focus:border-transparent transition-all text-sm font-medium text-slate-800"
-            />
-          </div>
 
-          {/* Filters Row: Diet Filter (Veg / Non-Veg / Selected) + Category Pills */}
-          <div className="flex items-center gap-2 min-w-0 w-full overflow-hidden">
             {/* Diet Segmented Switch */}
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80 shrink-0">
               <button
@@ -828,116 +889,203 @@ function MenusContent() {
                 <span>In Order ({cart.items.length})</span>
               </button>
             </div>
-
-            <div className="h-5 w-px bg-slate-200 hidden sm:block shrink-0" />
-
-            {/* Categories Pills - Auto-clamps with w-0 min-w-0 */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none flex-1 min-w-0 w-0">
-              <button
-                onClick={() => setSelectedCategory("all")}
-                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
-                  selectedCategory === "all"
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/60"
-                }`}
-              >
-                All
-              </button>
-
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat.toLowerCase())}
-                  className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
-                    selectedCategory === cat.toLowerCase()
-                      ? "bg-slate-900 text-white shadow-xs"
-                      : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/60"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 
-        {/* Menu Items Grid with Separate Veg & Non-Veg Sections */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-slate-50/50 space-y-5 min-w-0">
-          {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="h-36 rounded-2xl bg-white border border-slate-200 p-4 animate-pulse flex flex-col justify-between" />
-              ))}
+        {/* Menu Body: Left Categories Column + Right Dishes Grid */}
+        <div className="flex-1 flex flex-row min-h-0 min-w-0 overflow-hidden">
+          
+          {/* 🏷️ CATEGORIES SIDEBAR ON THE LEFT */}
+          <div className="w-48 sm:w-52 lg:w-56 shrink-0 border-r border-slate-200 bg-slate-50/70 flex flex-col h-full overflow-hidden select-none">
+            <div className="px-3.5 py-2.5 border-b border-slate-200 bg-white flex items-center justify-between shrink-0">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                <FiLayers className="text-[#e02424]" size={15} />
+                Categories
+              </span>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200/80">
+                {categories.length + 1}
+              </span>
             </div>
-          ) : filteredMenuItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-              <p className="font-bold tracking-tight text-slate-700">
-                {dietFilter === "selected" ? "No items selected in this order yet" : "No menu items found"}
-              </p>
-              <p className="text-xs text-slate-400 mt-1 max-w-sm text-center">
-                {dietFilter === "selected"
-                  ? "Click on any dish from the menu to add it to the order."
-                  : "Try searching for a different item or select another category/diet filter."}
-              </p>
-              {dietFilter === "selected" && (
+
+            {/* Scrollable category list */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              <button
+                type="button"
+                onClick={() => handleSelectCategory("all")}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer text-left ${
+                  selectedCategory.trim().toLowerCase() === "all"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "text-slate-700 hover:bg-slate-200/80 hover:text-slate-900"
+                }`}
+              >
+                <span className="truncate">All Categories</span>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold ml-1.5 shrink-0 ${
+                    selectedCategory.trim().toLowerCase() === "all"
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-200 text-slate-600"
+                  }`}
+                >
+                  {menuItems.length}
+                </span>
+              </button>
+
+              {categories.map((cat) => {
+                const normalized = cat.trim().toLowerCase()
+                const count = categoryCounts[normalized] || 0
+                const isSelected = selectedCategory.trim().toLowerCase() === normalized
+
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => handleSelectCategory(cat)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer text-left ${
+                      isSelected
+                        ? "bg-[#e02424] text-white shadow-xs shadow-red-200"
+                        : "text-slate-700 hover:bg-slate-200/80 hover:text-slate-900"
+                    }`}
+                  >
+                    <span className="truncate leading-tight" title={cat}>
+                      {cat}
+                    </span>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold ml-1.5 shrink-0 ${
+                        isSelected
+                          ? "bg-white/20 text-white"
+                          : "bg-slate-200 text-slate-600"
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* 🍽️ RIGHT: Dishes Grid */}
+          <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-slate-50/50 space-y-4 min-w-0">
+            {/* Active Category Banner (if filtered) */}
+            {selectedCategory.trim().toLowerCase() !== "all" && (
+              <div className="flex items-center justify-between bg-white px-3.5 py-2 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-400 font-bold">Category:</span>
+                  <span className="uppercase text-[#e02424] font-black truncate">{selectedCategory}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-[#e02424] font-bold border border-red-100 shrink-0">
+                    {filteredMenuItems.length} dishes
+                  </span>
+                  {dietFilter !== "all" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold uppercase border border-slate-200">
+                      Filter: {dietFilter.replace("_", " ")}
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setDietFilter("all")}
-                  className="mt-3 px-3 py-1.5 bg-[#e02424] text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                  onClick={() => {
+                    setSelectedCategory("all")
+                    if (dietFilter === "selected") setDietFilter("all")
+                  }}
+                  className="text-[11px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer hover:underline shrink-0 ml-2"
                 >
-                  View All Dishes
+                  <FiX size={13} /> View All Dishes
                 </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {/* 🟢 VEGETARIAN DISHES SECTION */}
-              {(dietFilter === "all" || dietFilter === "veg" || dietFilter === "selected") && vegDishes.length > 0 && (
-                <div className="space-y-2.5 min-w-0">
-                  <div className="flex items-center justify-between pb-1.5 border-b border-emerald-200/80">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-sm border-2 border-emerald-600 flex items-center justify-center bg-white shadow-2xs">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
-                      </span>
-                      <h3 className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wider">
-                        Vegetarian Dishes
-                      </h3>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        {vegDishes.length} items
-                      </span>
+              </div>
+            )}
+
+            {/* Menu Items Grid with Separate Veg & Non-Veg Sections */}
+            {loading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="h-36 rounded-2xl bg-white border border-slate-200 p-4 animate-pulse flex flex-col justify-between" />
+                ))}
+              </div>
+            ) : filteredMenuItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-64 text-slate-400 bg-white rounded-2xl border border-slate-200/80 p-6 text-center">
+                <p className="font-bold tracking-tight text-slate-700 text-sm">
+                  {dietFilter === "selected"
+                    ? "No items selected in this order yet"
+                    : selectedCategory.trim().toLowerCase() !== "all"
+                    ? `No ${dietFilter === "veg" ? "Vegetarian " : dietFilter === "non_veg" ? "Non-Vegetarian " : ""}dishes found in ${selectedCategory.toUpperCase()}`
+                    : "No menu items found"}
+                </p>
+                <p className="text-xs text-slate-400 mt-1.5 max-w-sm text-center">
+                  {dietFilter === "selected"
+                    ? "Click on any dish from the menu to add it to the order."
+                    : "Try switching diet filters or select another category."}
+                </p>
+                <div className="flex items-center gap-2 mt-4 flex-wrap justify-center">
+                  {dietFilter !== "all" && (
+                    <button
+                      type="button"
+                      onClick={() => setDietFilter("all")}
+                      className="px-3.5 py-1.5 bg-[#e02424] text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer hover:bg-red-700"
+                    >
+                      Show All Diet ({menuItems.length})
+                    </button>
+                  )}
+                  {selectedCategory.trim().toLowerCase() !== "all" && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategory("all")}
+                      className="px-3.5 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer hover:bg-slate-900"
+                    >
+                      View All Categories
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* 🟢 VEGETARIAN DISHES SECTION */}
+                {(dietFilter === "all" || dietFilter === "veg" || dietFilter === "selected") && vegDishes.length > 0 && (
+                  <div className="space-y-2.5 min-w-0">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-emerald-200/80">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-sm border-2 border-emerald-600 flex items-center justify-center bg-white shadow-2xs">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+                        </span>
+                        <h3 className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wider">
+                          Vegetarian Dishes
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {vegDishes.length} items
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                      {vegDishes.map((item) => renderDishCard(item, true))}
                     </div>
                   </div>
+                )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
-                    {vegDishes.map((item) => renderDishCard(item, true))}
-                  </div>
-                </div>
-              )}
+                {/* 🔴 NON-VEGETARIAN DISHES SECTION */}
+                {(dietFilter === "all" || dietFilter === "non_veg" || dietFilter === "selected") && nonVegDishes.length > 0 && (
+                  <div className="space-y-2.5 min-w-0">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-rose-200/80">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-sm border-2 border-rose-700 flex items-center justify-center bg-white shadow-2xs">
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-700" />
+                        </span>
+                        <h3 className="text-xs sm:text-sm font-black text-rose-950 uppercase tracking-wider">
+                          Non-Vegetarian Dishes
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                          {nonVegDishes.length} items
+                        </span>
+                      </div>
+                    </div>
 
-              {/* 🔴 NON-VEGETARIAN DISHES SECTION */}
-              {(dietFilter === "all" || dietFilter === "non_veg" || dietFilter === "selected") && nonVegDishes.length > 0 && (
-                <div className="space-y-2.5 min-w-0">
-                  <div className="flex items-center justify-between pb-1.5 border-b border-rose-200/80">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-sm border-2 border-rose-700 flex items-center justify-center bg-white shadow-2xs">
-                        <span className="w-2.5 h-2.5 rounded-full bg-rose-700" />
-                      </span>
-                      <h3 className="text-xs sm:text-sm font-black text-rose-950 uppercase tracking-wider">
-                        Non-Vegetarian Dishes
-                      </h3>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
-                        {nonVegDishes.length} items
-                      </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                      {nonVegDishes.map((item) => renderDishCard(item, false))}
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
-                    {nonVegDishes.map((item) => renderDishCard(item, false))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+                )}
+              </>
+            )}
+          </div>
         </div>
 
       </div>
