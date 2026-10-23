@@ -14,10 +14,17 @@ export interface BranchReceiptInfo {
   orgName?: string;
 }
 
+let memoryCachedReceiptInfo: Record<string, BranchReceiptInfo> = {};
+
 /**
  * Fetch branch receipt info for active branch, falling back to organization defaults
  */
 export async function getActiveBranchReceiptInfo(targetBranchId?: string): Promise<BranchReceiptInfo> {
+  const branchKey = targetBranchId || (typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") || "default" : "default");
+  if (memoryCachedReceiptInfo[branchKey]) {
+    return memoryCachedReceiptInfo[branchKey];
+  }
+
   const fallbackInfo: BranchReceiptInfo = {
     branchName: "Andhra Spicy House",
     branchCode: "HQ-01",
@@ -618,23 +625,22 @@ export function generateThermalReceiptHtml(params: {
             window.print();
           }
           window.onafterprint = function() {
+            try {
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'POS_RECEIPT_PRINTED' }, '*');
+              }
+            } catch (e) {}
             setTimeout(function() {
               window.close();
-            }, 300);
+            }, 100);
           };
           var img = document.querySelector('.logo-img');
           if (img && !img.complete) {
             img.onload = executePrint;
             img.onerror = executePrint;
-            setTimeout(executePrint, 1200);
+            setTimeout(executePrint, 250);
           } else {
-            if (document.readyState === 'complete') {
-              setTimeout(executePrint, 150);
-            } else {
-              window.addEventListener('load', function() {
-                setTimeout(executePrint, 150);
-              });
-            }
+            setTimeout(executePrint, 40);
           }
         </script>
       </body>

@@ -141,6 +141,9 @@ function MenusContent() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showBillModal, setShowBillModal] = useState(false)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [cancelItemTarget, setCancelItemTarget] = useState<CartItem | null>(null)
+  const [showCancelBillConfirm, setShowCancelBillConfirm] = useState(false)
+  const [isCancellingBill, setIsCancellingBill] = useState(false)
 
   // Manual Item Form
   const [manualName, setManualName] = useState("")
@@ -370,14 +373,21 @@ function MenusContent() {
     return item._isVeg !== undefined ? item._isVeg : computeIsDishVeg(item)
   }
 
-  // Helper to find if a menu item is already in the cart
+  // Fast indexed map of cart items for instant zero-latency O(1) lookups
+  const cartItemsMap = useMemo(() => {
+    const map = new Map<string, CartItem>()
+    for (const item of cart.items) {
+      const mId = typeof item.menuId === "object" ? item.menuId?._id : item.menuId
+      if (mId) map.set(String(mId), item)
+      if (item.name) map.set(item.name.trim().toLowerCase(), item)
+      if (item._id) map.set(String(item._id), item)
+    }
+    return map
+  }, [cart.items])
+
+  // Helper to find if a menu item is already in the cart (instant O(1))
   const getCartItemInfo = (item: MenuItem): CartItem | null => {
-    return (
-      cart.items.find((i) => {
-        const mId = typeof i.menuId === "object" ? i.menuId?._id : i.menuId
-        return mId === item._id || (i.name && i.name.toLowerCase() === item.name.toLowerCase())
-      }) || null
-    )
+    return cartItemsMap.get(item._id) || cartItemsMap.get(item.name.trim().toLowerCase()) || null
   }
 
   // Handle Category Selection with automatic Diet filter resolution (Instant response)
@@ -385,21 +395,9 @@ function MenusContent() {
     const target = catName.trim().toLowerCase()
     setSelectedCategory(target)
 
-    // 1. If currently on "In Order", switch to "all" so category items show up
+    // If currently on "In Order", switch to "all" so category items show up
     if (dietFilter === "selected") {
       setDietFilter("all")
-    } else if (dietFilter === "veg" || dietFilter === "non_veg") {
-      if (target !== "all") {
-        const catDishes = menuItems.filter(
-          (m) => m.category && m.category.trim().toLowerCase() === target
-        )
-        const hasMatchingDiet = catDishes.some((m) =>
-          dietFilter === "veg" ? isDishVeg(m) : !isDishVeg(m)
-        )
-        if (!hasMatchingDiet && catDishes.length > 0) {
-          setDietFilter("all")
-        }
-      }
     }
   }
 
@@ -413,10 +411,7 @@ function MenusContent() {
       if (dietFilter === "veg" && !isVeg) return false
       if (dietFilter === "non_veg" && isVeg) return false
       if (dietFilter === "selected") {
-        const inCart = cart.items.some((i) => {
-          const mId = typeof i.menuId === "object" ? i.menuId?._id : i.menuId
-          return mId === item._id || (i.name && i.name.toLowerCase() === item.name.toLowerCase())
-        })
+        const inCart = cartItemsMap.has(item._id) || cartItemsMap.has(item.name.trim().toLowerCase())
         if (!inCart) return false
       }
 
@@ -433,7 +428,7 @@ function MenusContent() {
 
       return matchesCategory && matchesSearch
     })
-  }, [menuItems, selectedCategory, search, dietFilter, cart.items])
+  }, [menuItems, selectedCategory, search, dietFilter, cartItemsMap])
 
   // Partitioned lists for clean separate sections
   const vegDishes = useMemo(() => filteredMenuItems.filter((m) => isDishVeg(m)), [filteredMenuItems])
@@ -492,8 +487,15 @@ function MenusContent() {
   }
 
   // Update Item Quantity
-  async function handleUpdateQuantity(itemId: string, action: 'increase' | 'decrease') {
+  async function handleUpdateQuantity(itemId: string, action: 'increase' | 'decrease', currentItem?: CartItem) {
     if (!activeTableId) return
+
+    // If decreasing and quantity is 1, prompt user to cancel item or cancel whole bill
+    if (action === 'decrease' && currentItem && currentItem.quantity <= 1) {
+      setCancelItemTarget(currentItem)
+      return
+    }
+
     try {
       const res = await api.post('/update/quantity', {
         tableId: activeTableId,
@@ -508,7 +510,7 @@ function MenusContent() {
     }
   }
 
-  // Delete Item
+  // Delete / Remove Item
   async function handleDeleteItem(item: CartItem) {
     if (!activeTableId) return
     try {
@@ -520,8 +522,48 @@ function MenusContent() {
       if (res?.data?.data) {
         setCart(res.data.data)
       }
+      setCancelItemTarget(null)
     } catch (err) {
       console.error("Failed to remove item", err)
+    }
+  }
+
+  // Cancel specific product
+  async function handleCancelParticularProduct(targetItem: CartItem) {
+    await handleDeleteItem(targetItem)
+  }
+
+  // Cancel Entire Bill for the active table
+  async function handleCancelEntireBill() {
+    if (!activeTableId) return
+    setIsCancellingBill(true)
+    try {
+      await api.post('/cancel/order', {
+        tableId: activeTableId,
+        orderId: cart._id,
+        reason: "Customer requested cancellation from POS Menu",
+      })
+
+      // Reset cart to empty state
+      setCart({
+        tableId: activeTableId,
+        items: [],
+        subtotal: 0,
+        gstEnabled: true,
+        gstAmount: 0,
+        serviceCharge: 0,
+        totalAmount: 0,
+        status: "PENDING",
+      })
+
+      setCancelItemTarget(null)
+      setShowCancelBillConfirm(false)
+      navigateToTables(`Table ${tableDisplayNum} bill cancelled and table is now available.`)
+    } catch (err) {
+      console.error("Failed to cancel bill", err)
+      alert("Failed to cancel bill. Please try again.")
+    } finally {
+      setIsCancellingBill(false)
     }
   }
 
@@ -541,7 +583,7 @@ function MenusContent() {
     }
   }
 
-  // Send Order (KOT) & Redirect to Kitchen
+  // Send Order (KOT) & Redirect to Floors & Tables
   async function handleSendKot() {
     if (!activeTableId) return
     setSendingKot(true)
@@ -554,8 +596,8 @@ function MenusContent() {
         // Refresh table status
         await fetchTables()
       }
-      // Redirect to Kitchen display to follow order preparation process
-      router.push('/user-dashboard/kitchen')
+      // Redirect to Floors & Tables as requested
+      navigateToTables(`Order sent to Kitchen (KOT) for Table ${tableDisplayNum}!`)
     } catch (err) {
       console.error("Failed to send KOT", err)
       alert("Failed to send order to kitchen. Please try again.")
@@ -625,7 +667,7 @@ function MenusContent() {
   const orderIdNumber = cart.orderNumber || (cart._id ? `#${cart._id.slice(-4).toUpperCase()}` : "#50")
 
   // High-Density Thermal Receipt Print Handler (TVS RP3160 Gold 80mm)
-  const handlePrintReceipt = async (customReceipt?: CartData | null) => {
+  const handlePrintReceipt = async (customReceipt?: CartData | null, redirectAfterPrint: boolean = true) => {
     const receipt = customReceipt || paidOrderData || cart
     if (!receipt || !receipt.items || receipt.items.length === 0) {
       alert("No order items available to print receipt.")
@@ -635,7 +677,40 @@ function MenusContent() {
     const printWindow = window.open("", "_blank", "width=380,height=650")
     if (!printWindow) {
       window.print()
+      if (redirectAfterPrint) {
+        navigateToTables(`Bill printed for Table ${tableDisplayNum}.`)
+      }
       return
+    }
+
+    // Automatically redirect to Floors & Tables once printing or saving as PDF is complete
+    if (redirectAfterPrint) {
+      let hasRedirected = false
+      const triggerRedirect = () => {
+        if (hasRedirected) return
+        hasRedirected = true
+        clearInterval(checkClosed)
+        window.removeEventListener('message', handleMessage)
+        navigateToTables(`Bill printed for Table ${tableDisplayNum}.`)
+      }
+
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'POS_RECEIPT_PRINTED') {
+          triggerRedirect()
+        }
+      }
+
+      window.addEventListener('message', handleMessage)
+
+      const checkClosed = setInterval(() => {
+        try {
+          if (!printWindow || printWindow.closed) {
+            triggerRedirect()
+          }
+        } catch (e) {
+          triggerRedirect()
+        }
+      }, 300)
     }
 
     try {
@@ -696,26 +771,23 @@ function MenusContent() {
     }
 
     setIsBilling(true)
-    let receiptToPrint: CartData = cart
+    const receiptToPrint: CartData = { ...cart }
 
     try {
-      // If table order has new items not yet ordered/confirmed in kitchen, confirm them first
-      if (hasPendingItems && activeTableId) {
-        try {
-          const res = await api.post('/take/order', {
-            tableId: activeTableId,
-          })
-          if (res?.data?.data) {
-            receiptToPrint = res.data.data
-            setCart(receiptToPrint)
-            fetchTables()
-          }
-        } catch (e) {
-          console.warn("Could not sync KOT before printing bill, using active cart", e)
-        }
-      }
+      // 1. Immediately launch thermal print dialog without blocking network latency
+      handlePrintReceipt(receiptToPrint)
 
-      await handlePrintReceipt(receiptToPrint)
+      // 2. In parallel background, confirm any pending items so kitchen is notified
+      if (hasPendingItems && activeTableId) {
+        api.post('/take/order', { tableId: activeTableId })
+          .then((res) => {
+            if (res?.data?.data) {
+              setCart(res.data.data)
+              fetchTables()
+            }
+          })
+          .catch((e) => console.warn("Background KOT sync on bill print:", e))
+      }
     } catch (err) {
       console.error("Failed to print bill", err)
       alert("Failed to print bill. Please try again.")
@@ -800,9 +872,15 @@ function MenusContent() {
             >
               <button
                 type="button"
-                onClick={() => handleUpdateQuantity(itemId, 'decrease')}
+                onClick={() => {
+                  if (inCart && inCart.quantity <= 1) {
+                    setCancelItemTarget(inCart)
+                  } else {
+                    handleUpdateQuantity(itemId, 'decrease', inCart || undefined)
+                  }
+                }}
                 className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-700 hover:text-[#e02424] transition active:scale-90 cursor-pointer"
-                title="Decrease quantity"
+                title="Decrease or cancel dish"
               >
                 <FiMinus size={11} />
               </button>
@@ -811,7 +889,7 @@ function MenusContent() {
               </span>
               <button
                 type="button"
-                onClick={() => handleUpdateQuantity(itemId, 'increase')}
+                onClick={() => handleUpdateQuantity(itemId, 'increase', inCart || undefined)}
                 className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-700 hover:text-[#e02424] transition active:scale-90 cursor-pointer"
                 title="Increase quantity"
               >
@@ -1196,7 +1274,18 @@ function MenusContent() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {cart.items.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowCancelBillConfirm(true)}
+                className="px-2 py-1 text-[9px] font-bold uppercase rounded-lg bg-red-50 text-[#e02424] border border-red-200 hover:bg-red-100 transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Cancel this order / bill completely"
+              >
+                <FiTrash2 size={10} />
+                <span>Cancel Bill</span>
+              </button>
+            )}
             {table?.availabilityStatus === "OCCUPIED" && (
               <button
                 type="button"
@@ -1282,16 +1371,22 @@ function MenusContent() {
                     <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200/80">
                       <button
                         type="button"
-                        onClick={() => handleUpdateQuantity(itemId, 'decrease')}
+                        onClick={() => {
+                          if (item.quantity <= 1) {
+                            setCancelItemTarget(item)
+                          } else {
+                            handleUpdateQuantity(itemId, 'decrease', item)
+                          }
+                        }}
                         className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
-                        title="Decrease"
+                        title="Decrease or cancel dish"
                       >
                         <FiMinus size={10} />
                       </button>
                       <span className="w-5 text-center font-black text-slate-900 text-xs">{item.quantity}</span>
                       <button
                         type="button"
-                        onClick={() => handleUpdateQuantity(itemId, 'increase')}
+                        onClick={() => handleUpdateQuantity(itemId, 'increase', item)}
                         className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
                         title="Increase"
                       >
@@ -1304,12 +1399,12 @@ function MenusContent() {
                       <span className="font-bold text-slate-900 text-xs sm:text-[13px]">₹{itemTotal}</span>
                     </div>
 
-                    {/* Delete */}
+                    {/* Delete / Cancel Item */}
                     <button
                       type="button"
-                      onClick={() => handleDeleteItem(item)}
+                      onClick={() => setCancelItemTarget(item)}
                       className="text-slate-300 hover:text-red-500 transition-colors p-1 active:scale-90 cursor-pointer"
-                      title="Remove Item"
+                      title="Cancel or remove dish"
                     >
                       <FiTrash2 size={13} />
                     </button>
@@ -1442,6 +1537,142 @@ function MenusContent() {
         </div>
 
       </div>
+
+      {/* 2.5 CANCEL ITEM OR ALL BILL MODAL */}
+      <AnimatePresence>
+        {cancelItemTarget && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-100"
+            >
+              <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-red-50 text-[#e02424] flex items-center justify-center shrink-0">
+                    <FiAlertCircle size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 tracking-tight leading-snug">Cancel Item or Bill</h3>
+                    <p className="text-xs text-slate-400 font-medium">Table {tableDisplayNum}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCancelItemTarget(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <FiX size={18} />
+                </button>
+              </div>
+
+              <div className="p-5 sm:p-6 space-y-4">
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selected Item</p>
+                      <h4 className="text-sm font-black text-slate-900 mt-0.5">{cancelItemTarget.name}</h4>
+                    </div>
+                    <span className="text-base font-black text-[#e02424]">₹{Number(cancelItemTarget.price).toFixed(2)}</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Do you want to cancel this particular product from the order, or cancel the entire bill?
+                  </p>
+                </div>
+
+                <div className="space-y-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleCancelParticularProduct(cancelItemTarget)}
+                    className="w-full py-3 px-4 rounded-xl bg-red-50 hover:bg-red-100 text-[#e02424] border border-red-200 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer active:scale-98 shadow-xs"
+                  >
+                    <FiTrash2 size={14} />
+                    <span>Cancel Particular Product</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isCancellingBill}
+                    onClick={handleCancelEntireBill}
+                    className="w-full py-3 px-4 rounded-xl bg-[#e02424] hover:bg-red-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer active:scale-98 shadow-md shadow-red-200 disabled:opacity-50"
+                  >
+                    <FiX size={14} />
+                    <span>{isCancellingBill ? "Cancelling Bill..." : "All the Bill can be Cancelled"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCancelItemTarget(null)}
+                    className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase tracking-wider transition cursor-pointer text-center"
+                  >
+                    Keep Item (Go Back)
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CANCEL ENTIRE BILL CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {showCancelBillConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-100"
+            >
+              <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-red-100 text-[#e02424] flex items-center justify-center shrink-0">
+                    <FiAlertCircle size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 tracking-tight leading-snug">Cancel Entire Bill?</h3>
+                    <p className="text-xs text-slate-400 font-medium">Table {tableDisplayNum}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCancelBillConfirm(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <FiX size={18} />
+                </button>
+              </div>
+
+              <div className="p-5 sm:p-6 space-y-4">
+                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                  Are you sure you want to cancel the entire bill for <strong className="text-slate-900">Table {tableDisplayNum}</strong>? All {cart.items.length} items will be removed, the kitchen will be updated, and the table will be freed.
+                </p>
+
+                <div className="space-y-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={isCancellingBill}
+                    onClick={handleCancelEntireBill}
+                    className="w-full py-3 px-4 rounded-xl bg-[#e02424] hover:bg-red-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer active:scale-98 shadow-md shadow-red-200 disabled:opacity-50"
+                  >
+                    <FiTrash2 size={14} />
+                    <span>{isCancellingBill ? "Cancelling Bill..." : "Yes, Cancel Entire Bill"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCancelBillConfirm(false)}
+                    className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase tracking-wider transition cursor-pointer text-center"
+                  >
+                    No, Keep Order
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* 3. ADD MANUAL ITEM MODAL (EXACT PETPOOJA SCREENSHOT 4) */}
       <AnimatePresence>

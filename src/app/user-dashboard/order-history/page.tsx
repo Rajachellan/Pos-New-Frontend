@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import api from "../../services/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { FaHistory } from "react-icons/fa";
+import { FaHistory, FaMoneyBillWave, FaCreditCard, FaQrcode } from "react-icons/fa";
 import {
   FiSearch,
   FiPrinter,
@@ -48,6 +48,7 @@ interface Order {
   totalAmount: number;
   paymentMethod?: string;
   status: "PENDING" | "ORDERED" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED";
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -199,6 +200,16 @@ function OrderHistoryContent() {
   const [customFrom, setCustomFrom] = useState<string>(getLocalDateString());
   const [customTo, setCustomTo] = useState<string>(getLocalDateString());
 
+  // Settlement & Cancellation Dialog States
+  const [settlingOrder, setSettlingOrder] = useState<Order | null>(null);
+  const [settleMethod, setSettleMethod] = useState<"CASH" | "UPI" | "CARD">("CASH");
+  const [settleWithPrint, setSettleWithPrint] = useState<boolean>(true);
+  const [isSettling, setIsSettling] = useState<boolean>(false);
+
+  const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>("Cancelled from Order History");
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+
   // Active filter range sent to server
   const [activeDateRange, setActiveDateRange] = useState<{
     startDate?: string;
@@ -274,17 +285,58 @@ function OrderHistoryContent() {
     applyPreset("ALL");
   };
 
-  const handleSettleOrder = async (order: Order) => {
+  const handleConfirmSettle = async () => {
+    if (!settlingOrder) return;
     try {
+      setIsSettling(true);
       await api.post("/pay/order", {
-        orderId: order._id,
-        tableId: order.tableId?._id,
-        paymentMethod: "CASH",
+        orderId: settlingOrder._id,
+        tableId: settlingOrder.tableId?._id,
+        paymentMethod: settleMethod,
       });
-      await handlePrintReceipt({ ...order, paymentMethod: "CASH", status: "COMPLETED" });
+
+      if (settleWithPrint) {
+        await handlePrintReceipt({
+          ...settlingOrder,
+          paymentMethod: settleMethod,
+          status: "COMPLETED",
+        });
+      }
+
+      setSettlingOrder(null);
+      if (selectedOrder && selectedOrder._id === settlingOrder._id) {
+        setSelectedOrder(null);
+      }
       await fetchOrders();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to settle order:", err);
+      alert(err.response?.data?.message || "Failed to settle order");
+    } finally {
+      setIsSettling(false);
+    }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!cancellingOrder) return;
+    try {
+      setIsCancelling(true);
+      await api.post("/cancel/order", {
+        orderId: cancellingOrder._id,
+        tableId: cancellingOrder.tableId?._id,
+        reason: cancelReason || "Cancelled from Order History",
+      });
+
+      setCancellingOrder(null);
+      setCancelReason("Cancelled from Order History");
+      if (selectedOrder && selectedOrder._id === cancellingOrder._id) {
+        setSelectedOrder(null);
+      }
+      await fetchOrders();
+    } catch (err: any) {
+      console.error("Failed to cancel order:", err);
+      alert(err.response?.data?.message || "Failed to cancel order");
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -299,6 +351,15 @@ function OrderHistoryContent() {
       window.removeEventListener("pos_branch_changed", handleBranchChange);
     };
   }, []);
+
+  const statusCounts = useMemo(() => {
+    return {
+      ALL: orders.length,
+      COMPLETED: orders.filter((o) => o.status === "COMPLETED").length,
+      ACTIVE: orders.filter((o) => ["PENDING", "ORDERED", "PREPARING", "READY"].includes(o.status)).length,
+      CANCELLED: orders.filter((o) => o.status === "CANCELLED").length,
+    };
+  }, [orders]);
 
   // Filter orders based on status & search query
   const filteredOrders = useMemo(() => {
@@ -328,6 +389,12 @@ function OrderHistoryContent() {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
             <FiCheckCircle className="text-xs" /> Completed
+          </span>
+        );
+      case "PENDING":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-900 border border-amber-300">
+            <FiClock className="text-xs" /> Unsettled / Pending
           </span>
         );
       case "PREPARING":
@@ -686,23 +753,32 @@ function OrderHistoryContent() {
       {/* Controls & Filter Bar */}
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Status Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
           {[
-            { key: "ALL", label: "All Orders" },
-            { key: "COMPLETED", label: "Completed" },
-            { key: "ACTIVE", label: "In Progress" },
-            { key: "CANCELLED", label: "Cancelled" },
+            { key: "ALL", label: "All Orders", count: statusCounts.ALL },
+            { key: "COMPLETED", label: "Completed", count: statusCounts.COMPLETED },
+            { key: "ACTIVE", label: "Unsettled / Active", count: statusCounts.ACTIVE },
+            { key: "CANCELLED", label: "Cancelled", count: statusCounts.CANCELLED },
           ].map((tab) => (
             <button
               key={tab.key}
               onClick={() => setSelectedStatus(tab.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
                 selectedStatus === tab.key
                   ? "bg-[#e02424] text-white shadow-xs"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
-              {tab.label}
+              <span>{tab.label}</span>
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                  selectedStatus === tab.key
+                    ? "bg-white/25 text-white"
+                    : "bg-gray-200 text-gray-700"
+                }`}
+              >
+                {tab.count}
+              </span>
             </button>
           ))}
         </div>
@@ -803,15 +879,30 @@ function OrderHistoryContent() {
                     </td>
                     <td className="py-3 px-4">{getStatusBadge(order.status)}</td>
                     <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {["ORDERED", "PREPARING", "READY"].includes(order.status) && (
-                          <button
-                            onClick={() => handleSettleOrder(order)}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] transition shadow-2xs whitespace-nowrap"
-                            title="Complete Order & Free Table"
-                          >
-                            Settle & Free
-                          </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {["PENDING", "ORDERED", "PREPARING", "READY"].includes(order.status) && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setSettlingOrder(order);
+                                setSettleMethod("CASH");
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] transition shadow-2xs whitespace-nowrap"
+                              title="Settle Order & Free Table"
+                            >
+                              Settle & Free
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCancellingOrder(order);
+                                setCancelReason("Cancelled from Order History");
+                              }}
+                              className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-[10px] transition whitespace-nowrap"
+                              title="Cancel Order"
+                            >
+                              Cancel
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => setSelectedOrder(order)}
@@ -860,6 +951,16 @@ function OrderHistoryContent() {
                 </span>
                 <h3 className="text-lg font-bold text-gray-900">Order Invoice Details</h3>
                 <p className="text-xs text-gray-500">Order ID: {selectedOrder.orderNumber || `#${selectedOrder._id}`}</p>
+                {selectedOrder.status === "CANCELLED" && (
+                  <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-2.5 text-center">
+                    <span className="text-xs font-bold text-red-700 flex items-center justify-center gap-1.5">
+                      <FiAlertCircle className="text-sm" /> Cancelled Order
+                    </span>
+                    <p className="text-[11px] text-red-600 mt-0.5">
+                      {selectedOrder.notes || "This order was cancelled without payment collected."}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="py-4 space-y-3">
@@ -906,18 +1007,245 @@ function OrderHistoryContent() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 mt-4">
+              {["PENDING", "ORDERED", "PREPARING", "READY"].includes(selectedOrder.status) ? (
+                <div className="flex flex-col gap-2 mt-4 pt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setSettlingOrder(selectedOrder);
+                        setSettleMethod("CASH");
+                      }}
+                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs"
+                    >
+                      <FiCheckCircle /> Settle & Free Table
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCancellingOrder(selectedOrder);
+                        setCancelReason("Cancelled from Order History");
+                      }}
+                      className="py-2.5 px-3 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1"
+                    >
+                      <FiAlertCircle /> Cancel
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handlePrintReceipt(selectedOrder)}
+                      className="flex-1 py-2 bg-[#fdf2f2] text-[#e02424] hover:bg-[#fde8e8] border border-red-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
+                    >
+                      <FiPrinter /> Print Receipt
+                    </button>
+                    <button
+                      onClick={() => setSelectedOrder(null)}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-xs font-semibold hover:bg-gray-200 transition"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 mt-4">
+                  <button
+                    onClick={() => handlePrintReceipt(selectedOrder)}
+                    className="flex-1 py-2.5 bg-[#e02424] text-white rounded-xl text-xs font-bold hover:bg-[#c81e1e] transition flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <FiPrinter /> Print Receipt
+                  </button>
+                  <button
+                    onClick={() => setSelectedOrder(null)}
+                    className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-xs font-semibold hover:bg-gray-200 transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Settle Order Modal */}
+      <AnimatePresence>
+        {settlingOrder && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-gray-100"
+            >
+              <button
+                onClick={() => setSettlingOrder(null)}
+                disabled={isSettling}
+                className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100"
+              >
+                <FiX className="text-lg" />
+              </button>
+
+              <div className="text-center pb-4 border-b border-gray-100">
+                <span className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 inline-flex items-center justify-center font-bold text-2xl mb-2">
+                  <FiDollarSign />
+                </span>
+                <h3 className="text-lg font-bold text-gray-900">Settle Order & Free Table</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Order {settlingOrder.orderNumber || `#${settlingOrder._id.slice(-6).toUpperCase()}`}
+                  {settlingOrder.tableId?.tableNumber ? ` • Table #${settlingOrder.tableId.tableNumber}` : ""}
+                </p>
+              </div>
+
+              <div className="py-4 space-y-4">
+                {/* Bill Amount */}
+                <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-600">Total Settlement Bill:</span>
+                  <span className="text-2xl font-black text-gray-900">
+                    ₹{(settlingOrder.totalAmount || 0).toFixed(2)}
+                  </span>
+                </div>
+
+                {/* Payment Method Selector */}
+                <div>
+                  <label className="text-xs font-bold text-gray-700 block mb-2">
+                    Select Payment Method:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: "CASH", label: "Cash", icon: <FaMoneyBillWave className="text-emerald-600 text-base" /> },
+                      { id: "UPI", label: "UPI / QR", icon: <FaQrcode className="text-blue-600 text-base" /> },
+                      { id: "CARD", label: "Card", icon: <FaCreditCard className="text-purple-600 text-base" /> },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setSettleMethod(m.id as any)}
+                        className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition ${
+                          settleMethod === m.id
+                            ? "border-[#e02424] bg-red-50/50 shadow-xs"
+                            : "border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
+                        }`}
+                      >
+                        <span className="mb-1">{m.icon}</span>
+                        <span className="text-xs font-bold text-gray-800">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Print Receipt Option */}
+                <label className="flex items-center gap-2 cursor-pointer bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={settleWithPrint}
+                    onChange={(e) => setSettleWithPrint(e.target.checked)}
+                    className="rounded text-[#e02424] focus:ring-[#e02424] h-4 w-4"
+                  />
+                  <span className="text-xs font-medium text-gray-700">
+                    Print thermal receipt upon settlement
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex items-center gap-3 mt-2">
                 <button
-                  onClick={() => handlePrintReceipt(selectedOrder)}
-                  className="flex-1 py-2.5 bg-[#e02424] text-white rounded-xl text-xs font-bold hover:bg-[#c81e1e] transition flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <FiPrinter /> Print Receipt
-                </button>
-                <button
-                  onClick={() => setSelectedOrder(null)}
+                  type="button"
+                  onClick={() => setSettlingOrder(null)}
+                  disabled={isSettling}
                   className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-xs font-semibold hover:bg-gray-200 transition"
                 >
-                  Close
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSettle}
+                  disabled={isSettling}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {isSettling ? (
+                    <>
+                      <FiRefreshCw className="animate-spin text-sm" /> Settling...
+                    </>
+                  ) : (
+                    <>
+                      <FiCheckCircle className="text-sm" /> Confirm Payment & Settle
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cancel Order Modal */}
+      <AnimatePresence>
+        {cancellingOrder && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-gray-100"
+            >
+              <button
+                onClick={() => setCancellingOrder(null)}
+                disabled={isCancelling}
+                className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100"
+              >
+                <FiX className="text-lg" />
+              </button>
+
+              <div className="text-center pb-4 border-b border-gray-100">
+                <span className="w-12 h-12 rounded-full bg-red-100 text-red-600 inline-flex items-center justify-center font-bold text-2xl mb-2">
+                  <FiAlertCircle />
+                </span>
+                <h3 className="text-lg font-bold text-gray-900">Cancel Order</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Order {cancellingOrder.orderNumber || `#${cancellingOrder._id.slice(-6).toUpperCase()}`}
+                  {cancellingOrder.tableId?.tableNumber ? ` • Table #${cancellingOrder.tableId.tableNumber}` : ""}
+                </p>
+              </div>
+
+              <div className="py-4 space-y-3">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 font-medium">
+                  ⚠️ This will cancel the order, mark table as AVAILABLE, and permanently record it as <span className="font-bold text-red-700">CANCELLED</span> in Order History.
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 block mb-1.5">
+                    Cancellation Reason (Optional):
+                  </label>
+                  <input
+                    type="text"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="e.g. Customer changed mind, wrong punch, etc."
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setCancellingOrder(null)}
+                  disabled={isCancelling}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-xs font-semibold hover:bg-gray-200 transition"
+                >
+                  Keep Order
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancel}
+                  disabled={isCancelling}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {isCancelling ? (
+                    <>
+                      <FiRefreshCw className="animate-spin text-sm" /> Cancelling...
+                    </>
+                  ) : (
+                    "Yes, Cancel Order"
+                  )}
                 </button>
               </div>
             </motion.div>
