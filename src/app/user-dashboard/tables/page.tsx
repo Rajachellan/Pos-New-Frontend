@@ -18,14 +18,35 @@ import {
   FiSearch,
   FiLayers,
   FiZap,
+  FiPrinter,
+  FiDollarSign,
+  FiCreditCard,
+  FiSmartphone,
+  FiCheckCircle,
+  FiShoppingBag,
+  FiTrash2,
+  FiArrowUpRight,
 } from "react-icons/fi";
 import { MdOutlineTableRestaurant } from "react-icons/md";
 import { sortTablesNaturally } from "../../utils/tableSort";
+import { getActiveBranchReceiptInfo, generateThermalReceiptHtml } from "../../utils/receiptBranding";
 
 interface AreaData {
   _id: string;
   areaName: string;
   areaCode?: string;
+}
+
+export interface ActiveOrderSummary {
+  _id: string;
+  orderNumber: string;
+  itemsCount: number;
+  items: Array<{ name: string; quantity: number; price: number }>;
+  subtotal: number;
+  gstAmount: number;
+  totalAmount: number;
+  status: string;
+  createdAt?: string;
 }
 
 interface TableData {
@@ -38,6 +59,7 @@ interface TableData {
       }
     | string;
   availabilityStatus: "AVAILABLE" | "OCCUPIED";
+  activeOrder?: ActiveOrderSummary | null;
   createdBy?: string;
 }
 
@@ -75,6 +97,12 @@ export default function FloorsAndTablesPage() {
   // Modals
   const [showAddAreaModal, setShowAddAreaModal] = useState(false);
   const [showAddTableModal, setShowAddTableModal] = useState(false);
+
+  // Quick Settle Modal State for Occupied Tables
+  const [settleTable, setSettleTable] = useState<TableData | null>(null);
+  const [settlePaymentMethod, setSettlePaymentMethod] = useState<"CASH" | "UPI" | "CARD">("CASH");
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [isPrintingBillId, setIsPrintingBillId] = useState<string | null>(null);
 
   // Area Action Popover
   const [activeAreaMenuId, setActiveAreaMenuId] = useState<string | null>(null);
@@ -202,10 +230,117 @@ export default function FloorsAndTablesPage() {
     try {
       await api.post(`/tables/${tableId}/release`);
       setTables((prev) =>
-        prev.map((t) => (t._id === tableId ? { ...t, availabilityStatus: "AVAILABLE" } : t))
+        prev.map((t) => (t._id === tableId ? { ...t, availabilityStatus: "AVAILABLE", activeOrder: null } : t))
       );
     } catch (err) {
       console.error("Failed to release table:", err);
+    }
+  };
+
+  // High-Density Thermal Receipt Print Handler (TVS RP3160)
+  const handlePrintReceipt = async (order: ActiveOrderSummary, tableNum: string, paymentMethod?: string) => {
+    const printWindow = window.open("", "_blank", "width=380,height=650");
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    try {
+      const receiptInfo = await getActiveBranchReceiptInfo();
+      const rawOrderNo = order.orderNumber || "1";
+      const rawToken = order.orderNumber?.replace(/\D/g, "") || "65";
+      const tokenNumber = rawToken.length > 3 ? rawToken.slice(-3) : rawToken || "65";
+
+      const subtotalVal = order.subtotal || 0;
+      const gstVal = order.gstAmount || 0;
+      const totalVal = Math.ceil(order.totalAmount || subtotalVal + gstVal);
+      const roundOffVal = Math.round((totalVal - subtotalVal - gstVal) * 100) / 100;
+
+      const formattedTable = tableNum.toUpperCase().startsWith("T") ? tableNum.toUpperCase() : `T${tableNum}`;
+
+      const html = generateThermalReceiptHtml({
+        receiptInfo,
+        orderNumber: rawOrderNo,
+        tokenNumber,
+        orderType: "Dine-In",
+        tableNumber: formattedTable,
+        customerName: "",
+        cashierName: "biller",
+        dateStr: new Date().toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        items: (order.items || []).map((it) => ({
+          name: it.name,
+          quantity: it.quantity,
+          price: it.price,
+        })),
+        subtotal: subtotalVal,
+        gstAmount: gstVal,
+        gstRate: 5,
+        roundOff: roundOffVal,
+        grandTotal: totalVal,
+        paymentMethod: paymentMethod,
+      });
+
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (err) {
+      console.error("Failed to generate thermal receipt", err);
+      printWindow.close();
+    }
+  };
+
+  // Direct Bill Print from Table Card
+  const handleDirectPrintBill = async (table: TableData, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!table.activeOrder) {
+      router.push(`/user-dashboard/menus?tableId=${table._id}&tableNumber=${table.tableNumber}`);
+      return;
+    }
+
+    setIsPrintingBillId(table._id);
+    try {
+      await handlePrintReceipt(table.activeOrder, table.tableNumber);
+    } catch (err) {
+      console.error("Direct print bill error", err);
+    } finally {
+      setIsPrintingBillId(null);
+    }
+  };
+
+  // Settle Bill directly from Tables Page
+  const handleCompleteSettle = async () => {
+    if (!settleTable || !settleTable._id) return;
+    setIsSubmittingPayment(true);
+    try {
+      await api.post("/pay/order", {
+        tableId: settleTable._id,
+        paymentMethod: settlePaymentMethod,
+      });
+
+      // Auto-print thermal receipt upon payment completion
+      if (settleTable.activeOrder) {
+        try {
+          await handlePrintReceipt(settleTable.activeOrder, settleTable.tableNumber, settlePaymentMethod);
+        } catch (printErr) {
+          console.warn("Auto-print error on settle", printErr);
+        }
+      }
+
+      setFlashNotification(`Payment recorded for Table ${settleTable.tableNumber} via ${settlePaymentMethod}! Table is now available.`);
+      setSettleTable(null);
+      await fetchTables();
+    } catch (err) {
+      console.error("Failed to settle order", err);
+      const axiosErr = err as AxiosError<{ message?: string }>;
+      alert(axiosErr.response?.data?.message || "Failed to record payment. Please try again.");
+    } finally {
+      setIsSubmittingPayment(false);
     }
   };
 
@@ -215,13 +350,26 @@ export default function FloorsAndTablesPage() {
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
+  // Format Title helper for proper casing
+  const formatTitle = (str: string): string => {
+    if (!str) return "";
+    return str
+      .toLowerCase()
+      .split(" ")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  };
+
   // Helper to extract Area Name safely
   const getTableAreaName = (table: TableData): string => {
+    let name = "Dining";
     if (typeof table.areaName === "object" && table.areaName !== null) {
-      return table.areaName.areaName;
+      name = table.areaName.areaName;
+    } else {
+      const matched = areas.find((a) => a._id === table.areaName);
+      if (matched) name = matched.areaName;
     }
-    const matched = areas.find((a) => a._id === table.areaName);
-    return matched ? matched.areaName : "DINING";
+    return formatTitle(name);
   };
 
   // Group tables by area
@@ -378,19 +526,28 @@ export default function FloorsAndTablesPage() {
       </div>
 
       {/* 2. Floor / Area Filter Pills Bar + Status Counts */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-7">
         {/* Left Side: Filter Pills */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
           {/* All Areas Pill */}
           <button
             onClick={() => setSelectedAreaId("all")}
-            className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${
               selectedAreaId === "all"
-                ? "bg-[#e02424] text-white shadow-xs"
-                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                ? "bg-slate-900 text-white shadow-xs"
+                : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
             }`}
           >
-            All Areas ({totalTables})
+            <span>All Areas</span>
+            <span
+              className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                selectedAreaId === "all"
+                  ? "bg-white/20 text-white"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {totalTables}
+            </span>
           </button>
 
           {/* Area Specific Pills */}
@@ -400,33 +557,45 @@ export default function FloorsAndTablesPage() {
               <button
                 key={g.area._id}
                 onClick={() => setSelectedAreaId(g.area._id)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${
                   isSelected
-                    ? "bg-[#e02424] text-white shadow-xs"
-                    : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
                 }`}
               >
-                {g.area.areaName} ({g.tables.length})
+                <span>{formatTitle(g.area.areaName)}</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                    isSelected
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {g.tables.length}
+                </span>
               </button>
             );
           })}
         </div>
 
-        {/* Right Side: Available & Occupied Legend */}
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-gray-700">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-            <span>Available ({availableCount})</span>
+        {/* Right Side: Available & Occupied Status Chips */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50/80 border border-emerald-200/70 text-emerald-800 text-xs font-bold shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50 inline-block" />
+            <span>Available <span className="text-emerald-900 font-black">({availableCount})</span></span>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs font-bold text-gray-700">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
-            <span>Occupied ({occupiedCount})</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-50/80 border border-rose-200/70 text-rose-800 text-xs font-bold shadow-2xs">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+            </span>
+            <span>Occupied <span className="text-rose-950 font-black">({occupiedCount})</span></span>
           </div>
 
           <button
             onClick={handleRefresh}
-            className="p-1.5 text-gray-400 hover:text-gray-700 transition"
+            className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800 transition shadow-2xs cursor-pointer active:scale-95"
             title="Refresh Feed"
           >
             <FiRefreshCw className={isRefreshing ? "animate-spin" : ""} size={14} />
@@ -473,15 +642,15 @@ export default function FloorsAndTablesPage() {
         <div className="space-y-8">
           {displayedSections.map(({ area, tables: areaTables }) => (
             <div key={area._id} className="space-y-3">
-              {/* Section Header Matching Screenshot: | AC Room 6 Tables ... */}
-              <div className="flex items-center justify-between">
+              {/* Section Header */}
+              <div className="flex items-center justify-between pb-1">
                 <div className="flex items-center">
-                  {/* Red vertical bar */}
-                  <span className="w-1 h-5 bg-[#e02424] rounded-full mr-2.5 inline-block" />
-                  <h2 className="text-base font-bold text-gray-900">
-                    {area.areaName}
+                  {/* Accent vertical bar */}
+                  <span className="w-1.5 h-5 bg-[#e02424] rounded-full mr-2.5 inline-block" />
+                  <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                    {formatTitle(area.areaName)}
                   </h2>
-                  <span className="text-xs text-gray-400 font-medium ml-2.5">
+                  <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full ml-3">
                     {areaTables.length} {areaTables.length === 1 ? "Table" : "Tables"}
                   </span>
                 </div>
@@ -494,21 +663,21 @@ export default function FloorsAndTablesPage() {
                         activeAreaMenuId === area._id ? null : area._id
                       )
                     }
-                    className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+                    className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition cursor-pointer"
                     title="Area Options"
                   >
                     <FiMoreHorizontal size={18} />
                   </button>
 
                   {activeAreaMenuId === area._id && (
-                    <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl border border-gray-200 shadow-lg py-1 z-20">
+                    <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl border border-slate-200 shadow-lg py-1 z-20">
                       <button
                         onClick={() => {
                           setNewTableAreaId(area._id);
                           setActiveAreaMenuId(null);
                           setShowAddTableModal(true);
                         }}
-                        className="w-full text-left px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                        className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                       >
                         <FiPlus className="text-[#e02424]" /> Add Table here
                       </button>
@@ -519,9 +688,9 @@ export default function FloorsAndTablesPage() {
 
               {/* Table Grid for this specific floor/area */}
               {areaTables.length === 0 ? (
-                <div className="p-6 bg-white rounded-2xl border border-dashed border-gray-200 text-center">
-                  <p className="text-xs text-gray-400">
-                    No tables configured in {area.areaName}.
+                <div className="p-8 bg-white rounded-2xl border border-dashed border-slate-200 text-center">
+                  <p className="text-xs text-slate-400">
+                    No tables configured in {formatTitle(area.areaName)}.
                   </p>
                   <button
                     onClick={() => {
@@ -553,46 +722,115 @@ export default function FloorsAndTablesPage() {
                             `/user-dashboard/menus?tableId=${table._id}&tableNumber=${table.tableNumber}`
                           )
                         }
-                        className="group bg-white rounded-2xl border border-gray-200/90 p-4 shadow-2xs hover:shadow-md transition cursor-pointer flex flex-col justify-between h-[135px] hover:border-[#e02424]/40"
+                        className={`group bg-white rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between h-[158px] p-3.5 select-none ${
+                          isOccupied
+                            ? "border-rose-200/90 shadow-2xs hover:shadow-md hover:border-rose-300 ring-1 ring-rose-500/10"
+                            : "border-slate-200/90 hover:border-slate-300 shadow-2xs hover:shadow-md hover:-translate-y-0.5"
+                        }`}
                       >
-                        {/* Top Row: Table Number + Status Dot */}
+                        {/* Top Row: Table Number + Badges */}
                         <div className="flex items-start justify-between">
-                          <span className="text-lg font-black text-gray-900 group-hover:text-[#e02424] transition">
-                            {formattedNum}
-                          </span>
-                          <span
-                            className={`w-2.5 h-2.5 rounded-full ${
-                              isOccupied ? "bg-red-500" : "bg-emerald-500"
-                            }`}
-                          />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-base font-black text-slate-900 group-hover:text-[#e02424] transition leading-none">
+                              {formattedNum}
+                            </span>
+                            {isOccupied && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-rose-50 text-rose-700 font-mono font-bold text-[9.5px] border border-rose-200/70 leading-none">
+                                {table.activeOrder?.orderNumber || "Bill"}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isOccupied ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="relative flex h-2 w-2" title="Occupied table">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                                </span>
+                                <button
+                                  type="button"
+                                  title="Release / Free Table Manually"
+                                  onClick={(e) => handleReleaseTable(table._id, table.tableNumber, e)}
+                                  className="text-slate-300 hover:text-rose-600 p-0.5 rounded transition cursor-pointer"
+                                >
+                                  <FiTrash2 size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                                Available
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Middle Row: Area Tag */}
-                        <div className="flex items-center gap-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                          <FiMapPin size={11} className="shrink-0" />
-                          <span className="truncate">{areaDisplayName}</span>
-                        </div>
+                        {/* Middle Section: Metrics or Area Info */}
+                        {isOccupied ? (
+                          <div className="py-1 px-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wider">
+                                Total
+                              </span>
+                              <span className="text-base font-black text-slate-900 tracking-tight leading-tight">
+                                ₹{Number(table.activeOrder?.totalAmount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-200/80 shadow-2xs">
+                                {table.activeOrder?.itemsCount || 1} {table.activeOrder?.itemsCount === 1 ? "Item" : "Items"}
+                              </span>
+                              <span className="block text-[9.5px] text-slate-400 font-medium capitalize mt-0.5 truncate max-w-[85px]">
+                                {areaDisplayName}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="py-1 px-1 flex flex-col justify-center">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 capitalize">
+                              <FiMapPin size={11} className="text-slate-400 shrink-0" />
+                              <span className="truncate">{areaDisplayName}</span>
+                            </div>
+                            <span className="text-[10.5px] text-slate-400 font-normal mt-0.5">
+                              Ready for guests
+                            </span>
+                          </div>
+                        )}
 
-                        {/* Bottom Row: Status Badge + Free Table Action */}
+                        {/* Bottom Row: Actions */}
                         <div>
                           {isOccupied ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="bg-red-50 text-red-600 border border-red-100 rounded-lg py-1 text-[10px] font-bold tracking-wider uppercase text-center flex-1 block">
-                                OCCUPIED
-                              </span>
+                            <div className="grid grid-cols-2 gap-2">
                               <button
                                 type="button"
-                                title="Free / Release Table"
-                                onClick={(e) => handleReleaseTable(table._id, table.tableNumber, e)}
-                                className="px-2 py-1 bg-gray-100 hover:bg-rose-50 text-gray-700 hover:text-rose-700 rounded-lg text-[10px] font-bold border border-gray-200 transition shrink-0"
+                                onClick={(e) => handleDirectPrintBill(table, e)}
+                                disabled={isPrintingBillId === table._id}
+                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 rounded-xl text-xs font-bold border border-slate-200/90 shadow-2xs hover:border-slate-300 transition active:scale-95 cursor-pointer"
+                                title="Direct Print TVS Slip (RP3160)"
                               >
-                                Free
+                                <FiPrinter size={12} className={isPrintingBillId === table._id ? "animate-spin text-[#e02424]" : "text-slate-500"} />
+                                <span>{isPrintingBillId === table._id ? "..." : "Bill"}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSettleTable(table);
+                                }}
+                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs transition active:scale-95 cursor-pointer"
+                                title="Quick Settle Payment"
+                              >
+                                <FiCheckCircle size={12} />
+                                <span>Settle</span>
                               </button>
                             </div>
                           ) : (
-                            <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg py-1 text-[10px] font-bold tracking-wider uppercase text-center w-full block">
-                              AVAILABLE
-                            </span>
+                            <div className="w-full py-1.5 px-2.5 rounded-xl bg-slate-50 group-hover:bg-slate-900 group-hover:text-white text-slate-600 border border-slate-200/80 group-hover:border-slate-900 text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 shadow-2xs">
+                              <FiPlus size={13} className="text-slate-400 group-hover:text-white transition-colors" />
+                              <span>Take Order</span>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -699,7 +937,7 @@ export default function FloorsAndTablesPage() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-500/20 disabled:opacity-50 cursor-pointer active:scale-95"
+                    className="px-5 py-2.5 bg-linear-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-500/20 disabled:opacity-50 cursor-pointer active:scale-95"
                   >
                     {isSubmitting ? "Creating..." : "Create Area"}
                   </button>
@@ -917,12 +1155,161 @@ export default function FloorsAndTablesPage() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-500/20 disabled:opacity-50 cursor-pointer active:scale-95"
+                    className="px-5 py-2.5 bg-linear-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-red-500/20 disabled:opacity-50 cursor-pointer active:scale-95"
                   >
                     {isSubmitting ? "Creating..." : "Create Table"}
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* QUICK SETTLE MODAL (DIRECT SETTLE & PRINT FROM TABLES PAGE) */}
+      <AnimatePresence>
+        {settleTable && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl border border-slate-100 space-y-5"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-sm">
+                    <FiPrinter size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900 leading-tight">
+                      Settle Bill & Take Payment
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      Table <span className="font-bold text-slate-800">{settleTable.tableNumber}</span>
+                      {settleTable.activeOrder?.orderNumber ? ` • ${settleTable.activeOrder.orderNumber}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettleTable(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <FiX size={18} />
+                </button>
+              </div>
+
+              {/* Total Amount Banner */}
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/80 text-center">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Total Payable
+                </span>
+                <p className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight mt-1">
+                  ₹{Number(settleTable.activeOrder?.totalAmount || 0).toFixed(2)}
+                </p>
+                <div className="mt-1 text-[11px] text-slate-500 font-medium">
+                  {settleTable.activeOrder?.itemsCount || 1} {settleTable.activeOrder?.itemsCount === 1 ? "item" : "items"}
+                  {settleTable.activeOrder?.gstAmount ? ` • Inc. GST ₹${Number(settleTable.activeOrder.gstAmount).toFixed(2)}` : ""}
+                </div>
+              </div>
+
+              {/* Items Summary */}
+              {settleTable.activeOrder?.items && settleTable.activeOrder.items.length > 0 && (
+                <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50/50 p-2.5 space-y-1.5 scrollbar-thin">
+                  {settleTable.activeOrder.items.map((it, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-xs">
+                      <span className="font-semibold text-slate-700 truncate pr-2">
+                        {it.name} <span className="text-slate-400 font-bold">x{it.quantity}</span>
+                      </span>
+                      <span className="font-bold text-slate-900 shrink-0">
+                        ₹{(it.price * it.quantity).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Payment Method Selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
+                  Select Payment Method
+                </label>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {[
+                    { id: "CASH", label: "Cash", sub: "Physical cash", icon: FiDollarSign },
+                    { id: "UPI", label: "UPI / QR", sub: "GPay / PhonePe", icon: FiSmartphone },
+                    { id: "CARD", label: "Card", sub: "Debit / Credit", icon: FiCreditCard },
+                  ].map((m) => {
+                    const Icon = m.icon;
+                    const isSelected = settlePaymentMethod === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setSettlePaymentMethod(m.id as "CASH" | "UPI" | "CARD")}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? "bg-slate-900 border-slate-900 text-white shadow-sm ring-2 ring-slate-900/10"
+                            : "bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50/80"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <Icon size={18} className={isSelected ? "text-white" : "text-slate-600"} />
+                          {isSelected && <FiCheck size={14} className="text-emerald-400" />}
+                        </div>
+                        <div>
+                          <span className="block font-bold text-xs">{m.label}</span>
+                          <span className={`block text-[10px] mt-0.5 ${isSelected ? "text-slate-300" : "text-slate-400"}`}>
+                            {m.sub}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 space-y-2.5">
+                <button
+                  type="button"
+                  onClick={handleCompleteSettle}
+                  disabled={isSubmittingPayment}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-slate-900/15 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
+                >
+                  <FiPrinter size={15} />
+                  <span>
+                    {isSubmittingPayment
+                      ? "Recording Payment..."
+                      : `Collect ₹${Number(settleTable.activeOrder?.totalAmount || 0).toFixed(2)} via ${settlePaymentMethod} & Print`}
+                  </span>
+                </button>
+
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setSettleTable(null)}
+                    className="text-slate-500 hover:text-slate-700 font-medium py-1 px-2 rounded-lg transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const tId = settleTable._id;
+                      const tNum = settleTable.tableNumber;
+                      setSettleTable(null);
+                      router.push(`/user-dashboard/menus?tableId=${tId}&tableNumber=${tNum}`);
+                    }}
+                    className="text-[#e02424] hover:underline font-bold py-1 px-2 transition cursor-pointer"
+                  >
+                    Open Full POS Menu ➔
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

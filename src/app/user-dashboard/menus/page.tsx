@@ -30,6 +30,44 @@ interface MenuItem {
   price: number
   category?: string
   foodType?: string
+  _isVeg?: boolean
+}
+
+// Global in-memory cache for instant zero-latency loading of menus & categories
+let globalCachedMenus: MenuItem[] = []
+const MENUS_CACHE_KEY = "pos_cached_menus_v1"
+
+function getInitialCachedMenus(): MenuItem[] {
+  if (globalCachedMenus.length > 0) return globalCachedMenus
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(MENUS_CACHE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          globalCachedMenus = parsed
+          return parsed
+        }
+      }
+    } catch {}
+  }
+  return []
+}
+
+// Fast detector for vegetarian dishes
+function computeIsDishVeg(item: MenuItem): boolean {
+  if (item._isVeg !== undefined) return item._isVeg
+  if (item.foodType) {
+    const ft = item.foodType.toUpperCase()
+    if (ft === "VEG" || ft === "VEGETARIAN") return true
+    if (ft === "NON_VEG" || ft === "NON-VEG" || ft === "NONVEG") return false
+  }
+  const text = `${item.name || ""} ${item.category || ""}`.toLowerCase()
+  const nonVegKeywords = [
+    "chicken", "mutton", "fish", "prawn", "egg", "non veg", "non-veg", "nonveg",
+    "meat", "crab", "keema", "pork", "beef", "lamb", "duck", "liver", "boti", "spl meals"
+  ]
+  return !nonVegKeywords.some((kw) => text.includes(kw))
 }
 
 interface CartItem {
@@ -79,7 +117,8 @@ function MenusContent() {
   const searchParams = useSearchParams()
   const tableId = searchParams.get("tableId")
 
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  // Instant hydration from cache so categories appear on frame 1 without delay
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => getInitialCachedMenus())
   const [table, setTable] = useState<TableInfo | null>(null)
   const [allTables, setAllTables] = useState<TableInfo[]>([])
   const [cart, setCart] = useState<CartData>({
@@ -95,7 +134,7 @@ function MenusContent() {
   const [search, setSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("all")
   const [dietFilter, setDietFilter] = useState<"all" | "veg" | "non_veg" | "selected">("all")
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => getInitialCachedMenus().length === 0)
 
   // Modals
   const [showManualItemModal, setShowManualItemModal] = useState(false)
@@ -195,12 +234,22 @@ function MenusContent() {
     return () => clearTimeout(timer)
   }, [redirectCountdown, tableDisplayNum])
 
-  // Fetch Menu Items
+  // Fetch Menu Items (Stale-While-Revalidate with Instant Local Persistence)
   async function fetchMenus() {
     try {
       const res = await api.get('/get/menus')
-      const data = Array.isArray(res?.data?.data) ? res.data.data : []
-      setMenuItems(data)
+      const rawData = Array.isArray(res?.data?.data) ? res.data.data : []
+      const processed: MenuItem[] = rawData.map((item: any) => ({
+        ...item,
+        _isVeg: computeIsDishVeg(item),
+      }))
+      globalCachedMenus = processed
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(MENUS_CACHE_KEY, JSON.stringify(processed))
+        } catch {}
+      }
+      setMenuItems(processed)
     } catch (err) {
       console.error("Failed to load menus", err)
     }
@@ -252,14 +301,17 @@ function MenusContent() {
     }
   }
 
-  // Initial load
+  // Initial load: non-blocking Stale-While-Revalidate
   useEffect(() => {
     async function init() {
-      setLoading(true)
-      await Promise.all([fetchMenus(), fetchTables()])
-      if (tableId) {
-        await fetchCart(tableId)
+      if (menuItems.length === 0) {
+        setLoading(true)
       }
+      const menuPromise = fetchMenus()
+      const tablePromise = fetchTables()
+      const cartPromise = tableId ? fetchCart(tableId) : Promise.resolve()
+
+      await Promise.allSettled([menuPromise, tablePromise, cartPromise])
       setLoading(false)
     }
     init()
@@ -283,54 +335,40 @@ function MenusContent() {
     }
   }, [activeTableId])
 
-  // Extract Categories (Case-Insensitive Deduplication & Alphabetically Sorted)
-  const categories = useMemo(() => {
+  // Single-pass computation for Categories, Category Counts, and Diet Totals (O(N) vs 5x loops)
+  const { categories, categoryCounts, totalVegCount, totalNonVegCount } = useMemo(() => {
     const categoryMap = new Map<string, string>()
+    const counts: Record<string, number> = {}
+    let vegCount = 0
+    let nonVegCount = 0
+
     menuItems.forEach((item) => {
+      const isVeg = item._isVeg !== undefined ? item._isVeg : computeIsDishVeg(item)
+      if (isVeg) vegCount++
+      else nonVegCount++
+
       if (item.category && item.category.trim()) {
         const trimmed = item.category.trim()
         const lowerKey = trimmed.toLowerCase()
         if (!categoryMap.has(lowerKey)) {
           categoryMap.set(lowerKey, trimmed.toUpperCase())
         }
+        counts[lowerKey] = (counts[lowerKey] || 0) + 1
       }
     })
-    return Array.from(categoryMap.values()).sort((a, b) => a.localeCompare(b))
-  }, [menuItems])
 
-  // Count items per category
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {}
-    menuItems.forEach((item) => {
-      if (item.category && item.category.trim()) {
-        const cat = item.category.trim().toLowerCase()
-        counts[cat] = (counts[cat] || 0) + 1
-      }
-    })
-    return counts
+    return {
+      categories: Array.from(categoryMap.values()).sort((a, b) => a.localeCompare(b)),
+      categoryCounts: counts,
+      totalVegCount: vegCount,
+      totalNonVegCount: nonVegCount,
+    }
   }, [menuItems])
 
   // Helper to detect if a dish is Vegetarian or Non-Vegetarian
   function isDishVeg(item: MenuItem): boolean {
-    if (item.foodType) {
-      const ft = item.foodType.toUpperCase()
-      if (ft === "VEG" || ft === "VEGETARIAN") return true
-      if (ft === "NON_VEG" || ft === "NON-VEG" || ft === "NONVEG") return false
-    }
-    const text = `${item.name || ""} ${item.category || ""}`.toLowerCase()
-    const nonVegKeywords = [
-      "chicken", "mutton", "fish", "prawn", "egg", "non veg", "non-veg", "nonveg",
-      "meat", "crab", "keema", "pork", "beef", "lamb", "duck", "liver", "boti", "spl meals"
-    ]
-    if (nonVegKeywords.some((kw) => text.includes(kw))) {
-      return false
-    }
-    return true
+    return item._isVeg !== undefined ? item._isVeg : computeIsDishVeg(item)
   }
-
-  // Total counts for Veg & Non-Veg
-  const totalVegCount = useMemo(() => menuItems.filter((m) => isDishVeg(m)).length, [menuItems])
-  const totalNonVegCount = useMemo(() => menuItems.filter((m) => !isDishVeg(m)).length, [menuItems])
 
   // Helper to find if a menu item is already in the cart
   const getCartItemInfo = (item: MenuItem): CartItem | null => {
@@ -342,7 +380,7 @@ function MenusContent() {
     )
   }
 
-  // Handle Category Selection with automatic Diet filter resolution
+  // Handle Category Selection with automatic Diet filter resolution (Instant response)
   const handleSelectCategory = (catName: string) => {
     const target = catName.trim().toLowerCase()
     setSelectedCategory(target)
@@ -351,8 +389,6 @@ function MenusContent() {
     if (dietFilter === "selected") {
       setDietFilter("all")
     } else if (dietFilter === "veg" || dietFilter === "non_veg") {
-      // 2. If the category has NO dishes matching the active diet filter (e.g. Non-Veg category with Veg filter),
-      // auto-reset to "all" so the user can see the dishes of the category they just clicked!
       if (target !== "all") {
         const catDishes = menuItems.filter(
           (m) => m.category && m.category.trim().toLowerCase() === target
@@ -540,6 +576,14 @@ function MenusContent() {
       if (res?.data?.data) {
         const completedOrder = res.data.data
         setPaidOrderData(completedOrder)
+
+        // Directly print thermal receipt upon payment completion
+        try {
+          await handlePrintReceipt(completedOrder)
+        } catch (err) {
+          console.error("Auto print receipt error on payment", err)
+        }
+
         // Reset current table cart so it's clean and available for next guests
         setCart({
           tableId: activeTableId,
@@ -581,8 +625,8 @@ function MenusContent() {
   const orderIdNumber = cart.orderNumber || (cart._id ? `#${cart._id.slice(-4).toUpperCase()}` : "#50")
 
   // High-Density Thermal Receipt Print Handler (TVS RP3160 Gold 80mm)
-  const handlePrintReceipt = async () => {
-    const receipt = paidOrderData || cart
+  const handlePrintReceipt = async (customReceipt?: CartData | null) => {
+    const receipt = customReceipt || paidOrderData || cart
     if (!receipt || !receipt.items || receipt.items.length === 0) {
       alert("No order items available to print receipt.")
       return
@@ -639,6 +683,44 @@ function MenusContent() {
     } catch (err) {
       console.error("Failed to generate thermal receipt", err)
       printWindow.close()
+    }
+  }
+
+  const [isBilling, setIsBilling] = useState(false)
+
+  // Direct Bill & Auto-Print Handler (Direct print on Bill button)
+  const handleDirectBillAndPrint = async () => {
+    if (!cart.items || cart.items.length === 0) {
+      alert("No dishes in the ticket to bill.")
+      return
+    }
+
+    setIsBilling(true)
+    let receiptToPrint: CartData = cart
+
+    try {
+      // If table order has new items not yet ordered/confirmed in kitchen, confirm them first
+      if (hasPendingItems && activeTableId) {
+        try {
+          const res = await api.post('/take/order', {
+            tableId: activeTableId,
+          })
+          if (res?.data?.data) {
+            receiptToPrint = res.data.data
+            setCart(receiptToPrint)
+            fetchTables()
+          }
+        } catch (e) {
+          console.warn("Could not sync KOT before printing bill, using active cart", e)
+        }
+      }
+
+      await handlePrintReceipt(receiptToPrint)
+    } catch (err) {
+      console.error("Failed to print bill", err)
+      alert("Failed to print bill. Please try again.")
+    } finally {
+      setIsBilling(false)
     }
   }
 
@@ -1337,12 +1419,13 @@ function MenusContent() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setShowBillModal(true)}
-                disabled={cart.items.length === 0 || cart.status === "COMPLETED"}
+                onClick={handleDirectBillAndPrint}
+                disabled={cart.items.length === 0 || cart.status === "COMPLETED" || isBilling}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-800 py-2 rounded-xl font-black uppercase tracking-wider text-[11px] transition-all flex items-center justify-center cursor-pointer disabled:opacity-40"
+                title="Print Bill Directly (TVS RP3160)"
               >
-                <FiPrinter className="mr-1.5 text-xs" />
-                Bill
+                <FiPrinter className={`mr-1.5 text-xs ${isBilling ? "animate-spin text-[#e02424]" : ""}`} />
+                {isBilling ? "Printing..." : "Bill"}
               </button>
 
               <button
@@ -1749,7 +1832,7 @@ function MenusContent() {
                 <div className="pt-2 space-y-2">
                   <button
                     type="button"
-                    onClick={handlePrintReceipt}
+                    onClick={() => handlePrintReceipt()}
                     className="w-full bg-[#e02424] hover:bg-red-700 text-white py-3.5 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 cursor-pointer"
                   >
                     <FiPrinter className="mr-2 text-sm" />

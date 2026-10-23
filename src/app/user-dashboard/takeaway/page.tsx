@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, useRef } from "react";
+import Link from "next/link";
 import api from "../../services/api";
 import { getSocket } from "../../services/socket";
 import { AxiosError } from "axios";
@@ -23,6 +24,9 @@ import {
   FiTrash2,
   FiTag,
   FiCheck,
+  FiCreditCard,
+  FiSmartphone,
+  FiLayers,
 } from "react-icons/fi";
 import { RiTakeawayLine, RiRestaurantLine, RiFireLine } from "react-icons/ri";
 import { getActiveBranchReceiptInfo, generateThermalReceiptHtml } from "../../utils/receiptBranding";
@@ -80,7 +84,7 @@ export default function TakeawayPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuSearch, setMenuSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
-  const [dietFilter, setDietFilter] = useState<"ALL" | "VEG" | "NON_VEG">("ALL");
+  const [dietFilter, setDietFilter] = useState<"ALL" | "VEG" | "NON_VEG" | "IN_ORDER">("ALL");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [specialNotes, setSpecialNotes] = useState("");
@@ -206,19 +210,45 @@ export default function TakeawayPage() {
     }
   }
 
-  // Settle & Complete Payment
-  async function handleCompletePayment() {
-    if (!settleOrder) return;
+  // Settle & Complete Payment (DIRECTLY PRINTS RECEIPT!)
+  async function handleCompletePayment(
+    targetOrder?: TakeawayOrder,
+    methodOverride?: "CASH" | "UPI" | "CARD"
+  ) {
+    const orderToSettle = targetOrder || settleOrder;
+    if (!orderToSettle) return;
+    const paymentMethodToUse = methodOverride || settlePaymentMethod || "CASH";
+
     setIsSubmittingPayment(true);
     try {
       await api.post("/pay/order", {
-        orderId: settleOrder._id,
-        paymentMethod: settlePaymentMethod,
+        orderId: orderToSettle._id,
+        paymentMethod: paymentMethodToUse,
       });
+
+      const updatedOrder: TakeawayOrder = {
+        ...orderToSettle,
+        status: "COMPLETED",
+        kitchenStatus: "SERVED",
+        paymentMethod: paymentMethodToUse,
+      };
+
+      // Optimistically update React state immediately
+      setOrders((prev) =>
+        prev.map((o) => (o._id === orderToSettle._id ? updatedOrder : o))
+      );
+
+      // DIRECTLY TRIGGER THERMAL RECEIPT PRINT!
+      await handlePrintReceipt(updatedOrder);
+
       setSettleOrder(null);
+      setToastMessage(
+        `Order ${orderToSettle.orderNumber || ""} billed via ${paymentMethodToUse} and receipt printed!`
+      );
+      setTimeout(() => setToastMessage(null), 3500);
       fetchOrders(true);
     } catch (err) {
-      console.error("Failed to complete payment", err);
+      console.error("Failed to complete payment and print receipt", err);
     } finally {
       setIsSubmittingPayment(false);
     }
@@ -265,12 +295,16 @@ export default function TakeawayPage() {
   }, [newOrderSubtotal, newOrderGst]);
 
   // Submit New Takeaway Order
-  async function handleCreateOrder(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleCreateOrder(
+    e?: React.FormEvent,
+    overridePaymentMethod?: "UNPAID" | "CASH" | "UPI" | "CARD"
+  ) {
+    if (e) e.preventDefault();
     if (cartItems.length === 0) {
       setFormError("Please add at least one item to the takeaway order.");
       return;
     }
+    const chosenPayment = overridePaymentMethod || paymentChoice;
     setFormError("");
     setIsSubmittingOrder(true);
 
@@ -288,11 +322,12 @@ export default function TakeawayPage() {
           notes: ci.notes,
         })),
         gstEnabled: isGstEnabled,
-        paymentMethod: paymentChoice === "UNPAID" ? "" : paymentChoice,
+        paymentMethod: chosenPayment === "UNPAID" ? "" : chosenPayment,
         branchId: savedBranchId && savedBranchId !== "ALL" ? savedBranchId : undefined,
       };
 
-      await api.post("/takeaway/create", payload);
+      const res = await api.post("/takeaway/create", payload);
+      const createdOrder = res?.data?.data;
 
       // Reset Form & Close Modal
       setCartItems([]);
@@ -301,6 +336,12 @@ export default function TakeawayPage() {
       setSpecialNotes("");
       setPaymentChoice("UNPAID");
       setIsNewOrderModalOpen(false);
+
+      // Auto-print thermal bill receipt immediately on Bill and Pay!
+      if (createdOrder) {
+        await handlePrintReceipt(createdOrder);
+      }
+
       fetchOrders(true);
     } catch (err) {
       const axiosError = err as AxiosError<{ message?: string }>;
@@ -327,7 +368,7 @@ export default function TakeawayPage() {
         orderType: "Takeaway",
         customerName: order.customerName || "",
         cashierName: "biller",
-        dateStr: new Date(order.createdAt).toLocaleString("en-IN", {
+        dateStr: new Date(order.createdAt || new Date()).toLocaleString("en-IN", {
           day: "2-digit",
           month: "2-digit",
           year: "numeric",
@@ -349,6 +390,15 @@ export default function TakeawayPage() {
       printWindow.document.open();
       printWindow.document.write(html);
       printWindow.document.close();
+
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (e) {
+          // ignore
+        }
+      }, 300);
     } catch (err) {
       console.error("Failed to generate thermal receipt", err);
     }
@@ -462,12 +512,26 @@ export default function TakeawayPage() {
       const cat = getDishCategory(item);
       if (cat) set.add(cat);
     });
-    return ["ALL", ...Array.from(set)];
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [menuItems]);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    menuItems.forEach((item) => {
+      const cat = getDishCategory(item).toLowerCase();
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [menuItems]);
+
+  const inCartMenuIds = useMemo(() => new Set(cartItems.map((ci) => ci.menuItem._id)), [cartItems]);
 
   // Filtered menu items for POS catalog
   const filteredMenuItems = useMemo(() => {
+    const q = menuSearch.trim().toLowerCase();
+
     return menuItems.filter((item) => {
+      if (dietFilter === "IN_ORDER" && !inCartMenuIds.has(item._id)) return false;
       const isVeg = isDishVeg(item);
       if (dietFilter === "VEG" && !isVeg) return false;
       if (dietFilter === "NON_VEG" && isVeg) return false;
@@ -476,18 +540,128 @@ export default function TakeawayPage() {
       const matchesCategory =
         selectedCategory === "ALL" ||
         cat.toLowerCase() === selectedCategory.toLowerCase();
-      const q = menuSearch.trim().toLowerCase();
       const matchesSearch =
         !q ||
         item.name.toLowerCase().includes(q) ||
         cat.toLowerCase().includes(q);
       return matchesCategory && matchesSearch;
     });
-  }, [menuItems, selectedCategory, menuSearch, dietFilter]);
+  }, [menuItems, selectedCategory, menuSearch, dietFilter, inCartMenuIds]);
 
   // Partitioned lists for clean separate sections
   const vegDishes = useMemo(() => filteredMenuItems.filter((m) => isDishVeg(m)), [filteredMenuItems]);
   const nonVegDishes = useMemo(() => filteredMenuItems.filter((m) => !isDishVeg(m)), [filteredMenuItems]);
+
+  // Render a dish card matching the POS Menu style from menus/page.tsx
+  function renderCatalogDishCard(item: MenuItem, isVegDish: boolean) {
+    const cartEntry = cartItems.find((ci) => ci.menuItem._id === item._id);
+    const qty = cartEntry?.quantity || 0;
+    const catName = getDishCategory(item);
+
+    return (
+      <div
+        key={item._id}
+        onClick={() => {
+          if (qty === 0) {
+            addItemToCart(item);
+          }
+        }}
+        className={`rounded-2xl p-3 sm:p-3.5 transition-all flex flex-col justify-between group h-36 relative select-none ${
+          qty > 0
+            ? "bg-red-50/30 border-2 border-[#e02424] shadow-xs ring-2 ring-red-500/10 cursor-default"
+            : isVegDish
+            ? "bg-white border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-emerald-500 hover:ring-2 hover:ring-emerald-100 cursor-pointer"
+            : "bg-white border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-red-400 hover:ring-2 hover:ring-red-100 cursor-pointer"
+        }`}
+      >
+        <div>
+          <div className="flex items-center justify-between gap-1.5 mb-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className={`w-3.5 h-3.5 rounded-xs border-2 flex items-center justify-center bg-white shrink-0 ${
+                  isVegDish ? "border-emerald-600" : "border-rose-700"
+                }`}
+                title={isVegDish ? "Pure Veg" : "Non-Veg"}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${isVegDish ? "bg-emerald-600" : "bg-rose-700"}`} />
+              </span>
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 truncate">
+                {catName || "General"}
+              </span>
+            </div>
+
+            {qty > 0 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-[#e02424] text-white shadow-2xs shrink-0 animate-in zoom-in-75 duration-150">
+                <FiCheckCircle size={9} />
+                <span>{qty} In Order</span>
+              </span>
+            )}
+          </div>
+
+          <h3
+            className={`text-xs sm:text-[13px] font-bold leading-snug line-clamp-2 transition-colors ${
+              qty > 0 ? "text-slate-900 font-extrabold" : "text-slate-800 group-hover:text-slate-900"
+            }`}
+            title={item.name}
+          >
+            {item.name}
+          </h3>
+        </div>
+
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+          <div>
+            <span className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+              ₹{Number(item.price).toFixed(2)}
+            </span>
+          </div>
+
+          {qty > 0 ? (
+            <div
+              className="flex items-center bg-white rounded-lg p-0.5 border border-red-200 shadow-2xs shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => updateCartQuantity(item._id, -1)}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-700 hover:text-[#e02424] transition active:scale-90 cursor-pointer"
+                title="Decrease quantity"
+              >
+                <FiMinus size={11} />
+              </button>
+              <span className="w-5 text-center font-black text-[#e02424] text-xs">
+                {qty}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateCartQuantity(item._id, 1)}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-700 hover:text-[#e02424] transition active:scale-90 cursor-pointer"
+                title="Increase quantity"
+              >
+                <FiPlus size={11} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                addItemToCart(item);
+              }}
+              className={`p-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95 shrink-0 ${
+                isVegDish
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white"
+                  : "bg-red-50 text-[#e02424] hover:bg-[#e02424] hover:text-white"
+              }`}
+              title="Add to order"
+            >
+              <FiPlus size={13} />
+              <span>Add</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   function renderOrderCard(order: TakeawayOrder) {
     const isReady = order.kitchenStatus === "READY";
@@ -498,59 +672,49 @@ export default function TakeawayPage() {
     return (
       <div
         key={order._id}
-        className={`flex flex-col justify-between rounded-2xl p-4 sm:p-5 border transition-all duration-200 shadow-xs hover:shadow-md ${
-          isReady
-            ? "bg-emerald-50/40 border-emerald-300 hover:border-emerald-400"
-            : isPreparing
-            ? "bg-amber-50/30 border-amber-300 hover:border-amber-400"
-            : "bg-white border-slate-200"
-        }`}
+        className="flex flex-col justify-between rounded-xl p-4 bg-white border border-gray-200 shadow-xs hover:shadow-md hover:border-gray-300 transition-all duration-150"
       >
         <div>
           {/* Top Bar with Token & Badges */}
-          <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-gray-100">
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 text-white font-black text-sm tracking-wide shadow-xs">
+              <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-md bg-gray-100 text-gray-900 border border-gray-200">
                 {order.orderNumber || "#TK"}
               </span>
               {isReady ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-300">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                  Ready for Pickup
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <FiCheckCircle size={11} /> Ready
                 </span>
               ) : isPreparing ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  In Kitchen
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200">
+                  <FiClock size={11} /> In Kitchen
                 </span>
               ) : (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-300">
-                  Handed Over
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-600 border border-gray-200">
+                  Completed
                 </span>
               )}
             </div>
 
-            <div className="text-right">
-              <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1 justify-end">
-                <FiClock size={11} />
-                {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            </div>
+            <span className="text-[11px] font-medium text-gray-400 flex items-center gap-1">
+              <FiClock size={11} />
+              {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
           </div>
 
           {/* Customer Info */}
           {(order.customerName || order.customerPhone) && (
-            <div className="mb-2.5 pb-2.5 border-b border-slate-200/80 flex items-center justify-between text-xs text-slate-700">
+            <div className="mb-2.5 pb-2 border-b border-gray-100 flex items-center justify-between text-xs text-gray-700">
               <div className="flex items-center gap-1.5 truncate">
-                <FiUser size={13} className="text-slate-400 shrink-0" />
-                <span className="font-bold truncate">{order.customerName || "Walk-in Guest"}</span>
+                <FiUser size={12} className="text-gray-400 shrink-0" />
+                <span className="font-semibold text-gray-800 truncate">{order.customerName || "Walk-in Guest"}</span>
               </div>
               {order.customerPhone && (
                 <a
                   href={`tel:${order.customerPhone}`}
-                  className="flex items-center gap-1 text-slate-500 hover:text-amber-600 shrink-0 font-medium"
+                  className="flex items-center gap-1 text-gray-500 hover:text-gray-900 shrink-0 text-[11px] font-medium"
                 >
-                  <FiPhone size={12} />
+                  <FiPhone size={11} />
                   <span>{order.customerPhone}</span>
                 </a>
               )}
@@ -558,33 +722,35 @@ export default function TakeawayPage() {
           )}
 
           {/* Items List */}
-          <div className="space-y-1.5 my-3 max-h-36 overflow-y-auto scrollbar-none pr-1">
+          <div className="space-y-1.5 my-2.5 max-h-36 overflow-y-auto scrollbar-none pr-1">
             {order.items.map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between text-xs text-slate-800">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="font-bold text-amber-600 w-5 text-right">{item.quantity}x</span>
-                  <span className="truncate">{item.name}</span>
+              <div key={idx} className="flex items-center justify-between text-xs text-gray-800">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-gray-900 w-5 text-right">{item.quantity}×</span>
+                  <span className="text-gray-700 truncate">{item.name}</span>
                 </div>
-                <span className="font-medium text-slate-500 shrink-0">₹{item.price * item.quantity}</span>
+                <span className="font-semibold text-gray-900 text-xs shrink-0">
+                  ₹{(item.price * item.quantity).toFixed(2)}
+                </span>
               </div>
             ))}
           </div>
 
           {/* Packaging Notes */}
           {order.notes && (
-            <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-amber-100/60 border border-amber-200/60 text-[11px] text-amber-900">
-              <span className="font-bold">Packing: </span>
+            <div className="mb-2.5 px-2.5 py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-[11px] text-gray-600">
+              <span className="font-bold text-gray-700">Packing: </span>
               {order.notes}
             </div>
           )}
         </div>
 
         {/* Bottom Card Footer */}
-        <div className="pt-3 border-t border-slate-200/80 space-y-3">
+        <div className="pt-3 border-t border-gray-100 space-y-3">
           <div className="flex items-center justify-between text-xs">
             <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Total</span>
-              <p className="text-base font-black text-slate-900 leading-none mt-0.5">
+              <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Total</span>
+              <p className="text-lg font-black text-gray-900 leading-tight">
                 ₹{order.totalAmount?.toFixed(2)}
               </p>
             </div>
@@ -593,8 +759,8 @@ export default function TakeawayPage() {
               <span
                 className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
                   isPaid
-                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                    : "bg-rose-100 text-rose-800 border border-rose-300"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    : "bg-red-50 text-red-700 border border-red-200"
                 }`}
               >
                 {isPaid ? `Paid (${order.paymentMethod})` : "Unpaid (Due)"}
@@ -605,41 +771,67 @@ export default function TakeawayPage() {
           {/* Actions Bar */}
           <div className="flex items-center gap-1.5 pt-1">
             {isPreparing && (
-              <button
-                onClick={() => handleUpdateStatus(order._id, "READY")}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
-              >
-                <FiCheckCircle size={14} />
-                <span>Mark Ready</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateStatus(order._id, "READY")}
+                  className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-xs transition cursor-pointer"
+                  title="Move order to Ready for Pickup"
+                >
+                  <FiCheckCircle size={13} className="inline mr-1 text-emerald-600" />
+                  Ready
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isPaid) {
+                      handleCompletePayment(order, (order.paymentMethod as any) || "CASH");
+                    } else {
+                      setSettleOrder(order);
+                      setSettlePaymentMethod("CASH");
+                    }
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white font-semibold text-xs tracking-wide shadow-xs active:scale-[0.98] transition cursor-pointer"
+                  title="Settle bill and print receipt"
+                >
+                  <FiPrinter size={14} />
+                  <span>{isPaid ? "Handover & Print" : "Bill & Print"}</span>
+                </button>
+              </>
             )}
 
             {isReady && !isPaid && (
               <button
+                type="button"
                 onClick={() => {
                   setSettleOrder(order);
                   setSettlePaymentMethod("CASH");
                 }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white font-semibold text-xs tracking-wide shadow-xs active:scale-[0.98] transition cursor-pointer"
+                title="Collect payment and automatically print receipt"
               >
-                <FiDollarSign size={14} />
-                <span>Pay & Handover</span>
+                <FiPrinter size={14} />
+                <span>Bill & Print</span>
               </button>
             )}
 
             {isReady && isPaid && (
               <button
-                onClick={() => handleUpdateStatus(order._id, "SERVED")}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wide shadow-xs active:scale-95 transition cursor-pointer"
+                type="button"
+                onClick={() => handleCompletePayment(order, (order.paymentMethod as any) || "CASH")}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white font-semibold text-xs tracking-wide shadow-xs active:scale-[0.98] transition cursor-pointer"
+                title="Hand over to customer and automatically print receipt"
               >
-                <FiCheck size={14} />
-                <span>Hand Over</span>
+                <FiPrinter size={14} />
+                <span>Hand Over & Print</span>
               </button>
             )}
 
             <button
+              type="button"
               onClick={() => handlePrintReceipt(order)}
-              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shrink-0"
+              className="p-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition cursor-pointer shrink-0"
               title="Print Parcel Slip / Receipt"
             >
               <FiPrinter size={15} />
@@ -650,184 +842,291 @@ export default function TakeawayPage() {
     );
   }
 
-  return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Top Header & New Order Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 text-white flex items-center justify-center shadow-md shadow-amber-900/20">
-              <RiTakeawayLine size={24} />
+  // Render Settle & Print Modal
+  const renderSettleModal = () => {
+    if (!settleOrder) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl border border-slate-100 space-y-5">
+          {/* Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-sm">
+                <FiPrinter size={18} />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 leading-tight">
+                  Settle & Print Receipt
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Order <span className="font-bold text-slate-700">{settleOrder.orderNumber || "#TK"}</span>
+                  {settleOrder.customerName ? ` • ${settleOrder.customerName}` : ""}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                Takeaway & Parcel Counter
-              </h1>
-              <p className="text-xs text-slate-500 font-medium">
-                Manage takeaway tokens, kitchen parcel packaging, customer pickups & billing.
-              </p>
+            <button
+              type="button"
+              onClick={() => setSettleOrder(null)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            >
+              <FiX size={18} />
+            </button>
+          </div>
+
+          {/* Total Amount Payable Banner */}
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/80 text-center">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+              Total Payable
+            </span>
+            <p className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight mt-1">
+              ₹{settleOrder.totalAmount?.toFixed(2)}
+            </p>
+            <div className="mt-1 text-[11px] text-slate-500 font-medium">
+              {settleOrder.items?.reduce((acc, it) => acc + (it.quantity || 1), 0)} items total
+              {settleOrder.gstAmount ? ` • Inc. GST ₹${settleOrder.gstAmount.toFixed(2)}` : ""}
+            </div>
+          </div>
+
+          {/* Payment Method Selector */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
+              Select Payment Method
+            </label>
+            <div className="grid grid-cols-3 gap-2.5">
+              {[
+                { id: "CASH", label: "Cash", sub: "Physical cash", icon: FiDollarSign },
+                { id: "UPI", label: "UPI / QR", sub: "GPay / PhonePe", icon: FiSmartphone },
+                { id: "CARD", label: "Card", sub: "Debit / Credit", icon: FiCreditCard },
+              ].map((m) => {
+                const Icon = m.icon;
+                const isSelected = settlePaymentMethod === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSettlePaymentMethod(m.id as "CASH" | "UPI" | "CARD")}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      isSelected
+                        ? "bg-slate-900 border-slate-900 text-white shadow-sm ring-2 ring-slate-900/10"
+                        : "bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50/80"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Icon size={18} className={isSelected ? "text-white" : "text-slate-600"} />
+                      {isSelected && <FiCheck size={14} className="text-emerald-400" />}
+                    </div>
+                    <div>
+                      <span className="block font-bold text-xs">{m.label}</span>
+                      <span className={`block text-[10px] mt-0.5 ${isSelected ? "text-slate-300" : "text-slate-400"}`}>
+                        {m.sub}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Primary Action Button */}
+          <div className="pt-2 space-y-2.5">
+            <button
+              type="button"
+              onClick={() => handleCompletePayment(settleOrder, settlePaymentMethod)}
+              disabled={isSubmittingPayment}
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-slate-900/15 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
+            >
+              <FiPrinter size={15} />
+              <span>
+                {isSubmittingPayment
+                  ? "Processing Payment..."
+                  : `Collect ₹${settleOrder.totalAmount?.toFixed(2)} via ${settlePaymentMethod} & Print`}
+              </span>
+            </button>
+
+            <div className="flex items-center justify-between text-xs pt-1">
+              <button
+                type="button"
+                onClick={() => setSettleOrder(null)}
+                className="text-slate-500 hover:text-slate-700 font-medium py-1 px-2 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!settleOrder) return;
+                  setIsSubmittingPayment(true);
+                  try {
+                    await api.post("/pay/order", {
+                      orderId: settleOrder._id,
+                      paymentMethod: settlePaymentMethod || "CASH",
+                    });
+                    try {
+                      await api.patch(`/kitchen/orders/${settleOrder._id}/status`, { status: "SERVED" });
+                    } catch (e) {}
+                    setSettleOrder(null);
+                    fetchOrders(true);
+                  } catch (e) {
+                    console.error("Failed to settle without printing", e);
+                  } finally {
+                    setIsSubmittingPayment(false);
+                  }
+                }}
+                disabled={isSubmittingPayment}
+                className="text-slate-400 hover:text-slate-600 underline font-medium py-1 px-2 transition"
+              >
+                Settle without printing
+              </button>
             </div>
           </div>
         </div>
+      </div>
+    );
+  };
 
-        <div className="flex items-center gap-2.5 shrink-0">
+  return !isNewOrderModalOpen ? (
+    <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <RiTakeawayLine className="text-[#e02424]" /> Takeaway & Parcel Counter
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Manage takeaway tokens, kitchen parcel packaging, customer pickups & billing.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => fetchOrders(true)}
             disabled={isRefreshing}
-            className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition shadow-xs cursor-pointer"
-            title="Refresh Takeaway Orders"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-100 transition shadow-xs w-fit cursor-pointer"
+            title="Refresh Feed"
           >
-            <FiRefreshCw size={17} className={isRefreshing ? "animate-spin text-amber-600" : ""} />
+            <FiRefreshCw className={isRefreshing ? "animate-spin text-[#e02424]" : ""} />
+            <span>Refresh Feed</span>
           </button>
 
           <button
             onClick={() => setIsNewOrderModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-red-950/20 active:scale-95 transition cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 bg-[#e02424] hover:bg-[#c81e1e] text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
           >
-            <FiPlus size={16} />
+            <FiPlus size={15} />
             <span>New Takeaway Order</span>
           </button>
         </div>
       </div>
 
       {/* KPI Stats Bar */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div
           onClick={() => setStatusFilter("PREPARING")}
-          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+          className={`bg-white p-4 rounded-xl border transition cursor-pointer flex items-center justify-between ${
             statusFilter === "PREPARING"
-              ? "border-amber-400 ring-2 ring-amber-400/20 shadow-sm"
-              : "border-slate-200/80 shadow-xs hover:border-amber-300"
-          } flex items-center gap-3.5`}
+              ? "border-[#e02424] ring-2 ring-[#e02424]/10 shadow-xs"
+              : "border-gray-200 hover:border-gray-300 shadow-xs"
+          }`}
         >
-          <div className="w-11 h-11 rounded-xl bg-amber-50 border border-amber-200/60 text-amber-600 flex items-center justify-center shrink-0">
-            <RiFireLine size={22} />
-          </div>
           <div>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">In Kitchen</p>
-            <p className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">{inKitchenCount}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">In Kitchen</p>
+            <h3 className="text-2xl font-extrabold text-gray-900 mt-1">{inKitchenCount}</h3>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl font-bold">
+            <FiClock />
           </div>
         </div>
 
         <div
           onClick={() => setStatusFilter("READY")}
-          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+          className={`bg-white p-4 rounded-xl border transition cursor-pointer flex items-center justify-between ${
             statusFilter === "READY"
-              ? "border-emerald-400 ring-2 ring-emerald-400/20 shadow-sm"
-              : "border-slate-200/80 shadow-xs hover:border-emerald-300"
-          } flex items-center gap-3.5`}
+              ? "border-[#e02424] ring-2 ring-[#e02424]/10 shadow-xs"
+              : "border-gray-200 hover:border-gray-300 shadow-xs"
+          }`}
         >
-          <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-200/60 text-emerald-600 flex items-center justify-center shrink-0">
-            <FiCheckCircle size={22} />
-          </div>
           <div>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ready for Pickup</p>
-            <p className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">{readyCount}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Ready for Pickup</p>
+            <h3 className="text-2xl font-extrabold text-gray-900 mt-1">{readyCount}</h3>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-bold">
+            <FiCheckCircle />
           </div>
         </div>
 
         <div
           onClick={() => setStatusFilter("COMPLETED")}
-          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+          className={`bg-white p-4 rounded-xl border transition cursor-pointer flex items-center justify-between ${
             statusFilter === "COMPLETED"
-              ? "border-blue-400 ring-2 ring-blue-400/20 shadow-sm"
-              : "border-slate-200/80 shadow-xs hover:border-blue-300"
-          } flex items-center gap-3.5`}
+              ? "border-[#e02424] ring-2 ring-[#e02424]/10 shadow-xs"
+              : "border-gray-200 hover:border-gray-300 shadow-xs"
+          }`}
         >
-          <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200/60 text-blue-600 flex items-center justify-center shrink-0">
-            <FiDollarSign size={22} />
-          </div>
           <div>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Today&apos;s Parcel Sales</p>
-            <p className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
-              ₹{todaySales.toLocaleString("en-IN")}
-            </p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Today&apos;s Parcel Sales</p>
+            <h3 className="text-2xl font-extrabold text-gray-900 mt-1">₹{todaySales.toFixed(2)}</h3>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-[#fdf2f2] text-[#e02424] flex items-center justify-center text-xl font-bold">
+            <FiDollarSign />
           </div>
         </div>
 
         <div
           onClick={() => setStatusFilter("ALL")}
-          className={`bg-white rounded-2xl p-4 border transition cursor-pointer ${
+          className={`bg-white p-4 rounded-xl border transition cursor-pointer flex items-center justify-between ${
             statusFilter === "ALL"
-              ? "border-purple-400 ring-2 ring-purple-400/20 shadow-sm"
-              : "border-slate-200/80 shadow-xs hover:border-purple-300"
-          } flex items-center gap-3.5`}
+              ? "border-[#e02424] ring-2 ring-[#e02424]/10 shadow-xs"
+              : "border-gray-200 hover:border-gray-300 shadow-xs"
+          }`}
         >
-          <div className="w-11 h-11 rounded-xl bg-purple-50 border border-purple-200/60 text-purple-600 flex items-center justify-center shrink-0">
-            <FiTag size={22} />
-          </div>
           <div>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Today</p>
-            <p className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">{todayOrders.length}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Today</p>
+            <h3 className="text-2xl font-extrabold text-gray-900 mt-1">{todayOrders.length}</h3>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl font-bold">
+            <FiTag />
           </div>
         </div>
       </div>
 
       {/* Filter Tabs & Search Bar */}
-      <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-          <button
-            onClick={() => setStatusFilter("PREPARING")}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "PREPARING"
-                ? "bg-amber-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            In Kitchen ({inKitchenCount})
-          </button>
-          <button
-            onClick={() => setStatusFilter("READY")}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "READY"
-                ? "bg-emerald-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            Ready for Pickup ({readyCount})
-          </button>
-          <button
-            onClick={() => setStatusFilter("ACTIVE")}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "ACTIVE"
-                ? "bg-slate-900 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            Active Pipeline ({activeCount})
-          </button>
-          <button
-            onClick={() => setStatusFilter("COMPLETED")}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "COMPLETED"
-                ? "bg-blue-600 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            Completed Today
-          </button>
-          <button
-            onClick={() => setStatusFilter("ALL")}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
-              statusFilter === "ALL"
-                ? "bg-slate-800 text-white shadow-xs"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            All Orders ({orders.length})
-          </button>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[
+            { key: "ACTIVE", label: `Active Pipeline (${activeCount})` },
+            { key: "PREPARING", label: `In Kitchen (${inKitchenCount})` },
+            { key: "READY", label: `Ready for Pickup (${readyCount})` },
+            { key: "COMPLETED", label: "Completed Today" },
+            { key: "ALL", label: `All Orders (${orders.length})` },
+          ].map((tab) => {
+            const isActive = statusFilter === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setStatusFilter(tab.key as any)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  isActive
+                    ? "bg-[#e02424] text-white shadow-xs"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Search */}
-        <div className="relative min-w-[220px]">
-          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+        <div className="relative min-w-[240px]">
+          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
           <input
             type="text"
             placeholder="Search Token, Customer, Phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+            className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-gray-50 border border-gray-300 text-xs text-gray-800 placeholder-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#e02424]"
           />
         </div>
       </div>
@@ -836,14 +1135,14 @@ export default function TakeawayPage() {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-44 rounded-2xl bg-slate-100 animate-pulse" />
+            <div key={i} className="h-44 rounded-xl bg-gray-100 animate-pulse border border-gray-200" />
           ))}
         </div>
       ) : filteredOrders.length === 0 ? (
-        <div className="py-16 text-center rounded-2xl bg-white border border-dashed border-slate-200 shadow-xs">
-          <FiShoppingBag className="mx-auto text-slate-300 mb-3" size={40} />
-          <p className="text-base font-bold text-slate-700">No Takeaway Orders Found</p>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+        <div className="py-16 text-center rounded-xl bg-white border border-dashed border-gray-300 shadow-xs">
+          <FiShoppingBag className="mx-auto text-gray-300 mb-3" size={40} />
+          <p className="text-base font-bold text-gray-700">No Takeaway Orders Found</p>
+          <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
             {searchQuery
               ? `No takeaway orders matched "${searchQuery}".`
               : statusFilter === "PREPARING"
@@ -871,17 +1170,17 @@ export default function TakeawayPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-                      <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wider">
+                      <h3 className="text-xs sm:text-sm font-bold text-gray-800 uppercase tracking-wider">
                         In Kitchen & Preparing ({inKitchenOrders.length})
                       </h3>
                     </div>
-                    <span className="text-[11px] font-bold text-slate-400">
-                      Click &quot;Mark Ready&quot; when dish is packed
+                    <span className="text-[11px] font-medium text-gray-500">
+                      Click &quot;Ready&quot; when packaging is complete
                     </span>
                   </div>
 
                   {inKitchenOrders.length === 0 ? (
-                    <div className="p-5 rounded-2xl bg-amber-50/40 border border-amber-200/60 text-xs text-amber-900 font-medium text-center">
+                    <div className="p-6 rounded-xl bg-white border border-gray-200 text-xs text-gray-500 font-medium text-center">
                       No takeaway orders currently in kitchen. All dishes are packed!
                     </div>
                   ) : (
@@ -896,17 +1195,17 @@ export default function TakeawayPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                      <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wider">
+                      <h3 className="text-xs sm:text-sm font-bold text-gray-800 uppercase tracking-wider">
                         Ready for Pickup ({readyOrders.length})
                       </h3>
                     </div>
-                    <span className="text-[11px] font-bold text-slate-400">
+                    <span className="text-[11px] font-medium text-gray-500">
                       Awaiting customer arrival & handover
                     </span>
                   </div>
 
                   {readyOrders.length === 0 ? (
-                    <div className="p-5 rounded-2xl bg-emerald-50/40 border border-emerald-200/60 text-xs text-emerald-900 font-medium text-center">
+                    <div className="p-6 rounded-xl bg-white border border-gray-200 text-xs text-gray-500 font-medium text-center">
                       No ready orders waiting for pickup right now.
                     </div>
                   ) : (
@@ -946,53 +1245,45 @@ export default function TakeawayPage() {
           </button>
         </div>
       )}
+      {renderSettleModal()}
+    </div>
+  ) : (
+    <div className="h-[calc(100vh-65px)] flex flex-col bg-slate-50 relative overflow-hidden w-full min-w-0 max-w-full animate-in fade-in duration-150">
+      
+      {/* Top POS Header Bar */}
+      <div className="h-14 sm:h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between shrink-0 shadow-xs z-30">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center">
+            <span className="mr-2 p-1.5 bg-red-100 rounded-lg text-[#e02424]">
+              <RiTakeawayLine size={20} />
+            </span>
+            Takeaway Menu
+          </h2>
+        </div>
 
-      {/* =================================================================== */}
-      {/* FULL-PAGE TAKEAWAY POS COUNTER INTERFACE                           */}
-      {/* =================================================================== */}
-      {isNewOrderModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col h-screen w-screen overflow-hidden animate-in fade-in duration-150">
-          {/* Top POS Header Bar */}
-          <div className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between shrink-0 shadow-xs z-30">
-            <div className="flex items-center gap-3 sm:gap-4">
-              <button
-                type="button"
-                onClick={() => setIsNewOrderModalOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition active:scale-95 cursor-pointer shadow-2xs"
-                title="Return to Takeaway Orders Board"
-              >
-                <FiArrowLeft size={16} />
-                <span className="hidden sm:inline">Back to Orders</span>
-              </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsNewOrderModalOpen(false)}
+            className="text-xs font-bold text-gray-700 hover:text-slate-900 transition flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 shadow-2xs cursor-pointer"
+            title="Return to Takeaway Orders Board"
+          >
+            <FiArrowLeft size={13} /> Back to Orders Board
+          </button>
 
-              <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <Link
+            href="/user-dashboard/tables"
+            className="text-xs font-bold text-gray-700 hover:text-slate-900 transition flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 shadow-2xs"
+            title="Floors & Tables"
+          >
+            Floors & Tables
+          </Link>
 
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 text-white flex items-center justify-center shadow-md shadow-amber-900/20">
-                  <RiTakeawayLine size={22} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight leading-tight">
-                      Takeaway POS Counter
-                    </h2>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200 uppercase tracking-wider">
-                      Parcel Ticket
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
-                    Punch parcel ticket, capture customer details, and dispatch directly to kitchen
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 sm:gap-3">
               {cartItems.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {
-                    if (confirm("Clear all items from this takeaway ticket?")) {
+                    if (confirm("Clear all items from this ticket?")) {
                       setCartItems([]);
                     }
                   }}
@@ -1005,49 +1296,53 @@ export default function TakeawayPage() {
               <button
                 type="button"
                 onClick={() => setIsNewOrderModalOpen(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer ml-1"
                 title="Close POS Counter (Esc)"
               >
-                <FiX size={22} />
+                <FiX size={20} />
               </button>
             </div>
           </div>
 
           {/* POS Counter Main Body */}
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
-            {/* LEFT COLUMN: Dish Catalog & Search & Categories */}
-            <div className="flex-1 flex flex-col bg-slate-50 min-h-0 overflow-hidden border-r border-slate-200">
-              {/* Search, Diet Filter & Category Tabs Bar */}
-              <div className="p-4 bg-white border-b border-slate-200/80 space-y-3 shrink-0">
-                {/* Search Bar */}
-                <div className="relative">
-                  <FiSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                  <input
-                    type="text"
-                    placeholder="Search dishes to pack (e.g. biryani, meals, curry, starter)..."
-                    value={menuSearch}
-                    onChange={(e) => setMenuSearch(e.target.value)}
-                    className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/30 transition"
-                  />
-                  {menuSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setMenuSearch("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1"
-                    >
-                      <FiX size={14} />
-                    </button>
-                  )}
-                </div>
+            
+            {/* 1. LEFT COLUMN: MENU (SEARCH + DIET SWITCH, CATEGORIES SIDEBAR, DISHES GRID) */}
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 h-full border-r border-slate-200 bg-white overflow-hidden">
+              
+              {/* Search Bar & Diet Filters Row */}
+              <div className="p-3 sm:p-4 border-b border-slate-100 space-y-2.5 shrink-0 min-w-0 w-full">
+                <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+                  {/* Search Bar */}
+                  <div className="relative group flex-1 min-w-[200px]">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#e02424] transition-colors">
+                      <FiSearch size={16} />
+                    </div>
+                    <input
+                      type="text"
+                      value={menuSearch}
+                      onChange={(e) => setMenuSearch(e.target.value)}
+                      placeholder="Search menu items..."
+                      className="block w-full pl-10 pr-8 py-2 border border-slate-200 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#e02424] focus:border-transparent transition-all text-sm font-medium text-slate-800"
+                    />
+                    {menuSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setMenuSearch("")}
+                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-700 cursor-pointer"
+                        title="Clear search"
+                      >
+                        <FiX size={15} />
+                      </button>
+                    )}
+                  </div>
 
-                {/* Filters Row: Diet Filter (Veg / Non-Veg) + Category Pills */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
                   {/* Diet Segmented Switch */}
                   <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80 shrink-0">
                     <button
                       type="button"
                       onClick={() => setDietFilter("ALL")}
-                      className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                         dietFilter === "ALL"
                           ? "bg-white text-slate-900 shadow-xs"
                           : "text-slate-600 hover:text-slate-900"
@@ -1059,14 +1354,14 @@ export default function TakeawayPage() {
                     <button
                       type="button"
                       onClick={() => setDietFilter("VEG")}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                         dietFilter === "VEG"
                           ? "bg-emerald-600 text-white shadow-xs"
                           : "text-emerald-700 hover:bg-emerald-50/80"
                       }`}
                     >
-                      <span className="w-3 h-3 rounded-xs border-2 border-current flex items-center justify-center">
-                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                      <span className="w-2.5 h-2.5 rounded-xs border border-current flex items-center justify-center">
+                        <span className="w-1 h-1 rounded-full bg-current" />
                       </span>
                       <span>Veg ({totalVegCount})</span>
                     </button>
@@ -1074,291 +1369,320 @@ export default function TakeawayPage() {
                     <button
                       type="button"
                       onClick={() => setDietFilter("NON_VEG")}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                         dietFilter === "NON_VEG"
                           ? "bg-rose-700 text-white shadow-xs"
                           : "text-rose-700 hover:bg-rose-50/80"
                       }`}
                     >
-                      <span className="w-3 h-3 rounded-xs border-2 border-current flex items-center justify-center">
-                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                      <span className="w-2.5 h-2.5 rounded-xs border border-current flex items-center justify-center">
+                        <span className="w-1 h-1 rounded-full bg-current" />
                       </span>
                       <span>Non-Veg ({totalNonVegCount})</span>
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDietFilter("IN_ORDER")}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        dietFilter === "IN_ORDER"
+                          ? "bg-[#e02424] text-white shadow-xs"
+                          : "text-slate-700 hover:text-[#e02424] hover:bg-red-50/80"
+                      }`}
+                    >
+                      <FiCheckCircle size={11} className={dietFilter === "IN_ORDER" ? "text-white" : "text-[#e02424]"} />
+                      <span>In Order ({cartItems.length})</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Menu Body: Left Categories Sidebar + Right Dishes Grid */}
+              <div className="flex-1 flex flex-row min-h-0 min-w-0 overflow-hidden">
+                
+                {/* 🏷️ CATEGORIES SIDEBAR ON THE LEFT */}
+                <div className="w-48 sm:w-52 lg:w-56 shrink-0 border-r border-slate-200 bg-slate-50/70 flex flex-col h-full overflow-hidden select-none">
+                  <div className="px-3.5 py-2.5 border-b border-slate-200 bg-white flex items-center justify-between shrink-0">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                      <FiLayers className="text-[#e02424]" size={15} />
+                      Categories
+                    </span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200/80">
+                      {categories.length + 1}
+                    </span>
                   </div>
 
-                  <div className="h-5 w-px bg-slate-200 hidden sm:block shrink-0" />
+                  {/* Scrollable category list */}
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategory("ALL")}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer text-left ${
+                        selectedCategory === "ALL"
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : "text-slate-700 hover:bg-slate-200/80 hover:text-slate-900"
+                      }`}
+                    >
+                      <span className="truncate">All Categories</span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold ml-1.5 shrink-0 ${
+                          selectedCategory === "ALL"
+                            ? "bg-white/20 text-white"
+                            : "bg-slate-200 text-slate-600"
+                        }`}
+                      >
+                        {menuItems.length}
+                      </span>
+                    </button>
 
-                  {/* Category Pills Filter */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none flex-1">
                     {categories.map((cat) => {
-                      const isSelected = selectedCategory.toLowerCase() === cat.toLowerCase();
+                      const normalized = cat.toLowerCase();
+                      const count = categoryCounts[normalized] || 0;
+                      const isSelected = selectedCategory.toLowerCase() === normalized;
+
                       return (
                         <button
                           key={cat}
                           type="button"
                           onClick={() => setSelectedCategory(cat)}
-                          className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer text-left ${
                             isSelected
-                              ? "bg-slate-900 text-white shadow-xs"
-                              : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/60"
+                              ? "bg-[#e02424] text-white shadow-xs shadow-red-200"
+                              : "text-slate-700 hover:bg-slate-200/80 hover:text-slate-900"
                           }`}
                         >
-                          {cat}
+                          <span className="truncate leading-tight" title={cat}>
+                            {cat}
+                          </span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ml-1.5 shrink-0 ${
+                              isSelected
+                                ? "bg-white/20 text-white"
+                                : "bg-slate-200 text-slate-600"
+                            }`}
+                          >
+                            {count}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
-              </div>
 
-              {/* Menu Items Catalog with Separate Veg & Non-Veg Sections */}
-              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-6 scrollbar-thin scrollbar-thumb-slate-300">
-                {filteredMenuItems.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-center">
-                    <FiSearch size={36} className="text-slate-300 mb-2" />
-                    <p className="font-bold text-slate-700 text-sm">No dishes found</p>
-                    <p className="text-xs text-slate-400 mt-1">Try another search or change the diet/category filter.</p>
-                  </div>
-                ) : (
-                  <>
-                    {/* 🟢 VEGETARIAN DISHES SECTION */}
-                    {(dietFilter === "ALL" || dietFilter === "VEG") && vegDishes.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-emerald-200/80">
-                          <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-sm border-2 border-emerald-600 flex items-center justify-center bg-white shadow-2xs">
-                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
-                            </span>
-                            <h3 className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wider">
-                              Vegetarian Dishes
-                            </h3>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              {vegDishes.length} items
-                            </span>
+                {/* 🍽️ DISHES GRID */}
+                <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-slate-50/50 space-y-4 min-w-0">
+                  {/* Active Category Banner (if filtered) */}
+                  {selectedCategory !== "ALL" && (
+                    <div className="flex items-center justify-between bg-white px-3.5 py-2 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-slate-400 font-bold">Category:</span>
+                        <span className="uppercase text-[#e02424] font-black truncate">{selectedCategory}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-[#e02424] font-bold border border-red-100 shrink-0">
+                          {filteredMenuItems.length} dishes
+                        </span>
+                        {dietFilter !== "ALL" && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold uppercase border border-slate-200">
+                            Filter: {dietFilter.replace("_", " ")}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCategory("ALL");
+                          if (dietFilter === "IN_ORDER") setDietFilter("ALL");
+                        }}
+                        className="text-[11px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer hover:underline shrink-0 ml-2"
+                      >
+                        <FiX size={13} /> View All Dishes
+                      </button>
+                    </div>
+                  )}
+
+                  {filteredMenuItems.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-slate-400 bg-white rounded-2xl border border-slate-200/80 p-6 text-center">
+                      <p className="font-bold tracking-tight text-slate-700 text-sm">
+                        {dietFilter === "IN_ORDER"
+                          ? "No items selected in this ticket yet"
+                          : selectedCategory !== "ALL"
+                          ? `No ${dietFilter === "VEG" ? "Vegetarian " : dietFilter === "NON_VEG" ? "Non-Vegetarian " : ""}dishes found in ${selectedCategory.toUpperCase()}`
+                          : "No menu items found"}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1.5 max-w-sm text-center">
+                        {dietFilter === "IN_ORDER"
+                          ? "Click on any dish from the catalog to add it to the ticket."
+                          : "Try switching diet filters or select another category."}
+                      </p>
+                      <div className="flex items-center gap-2 mt-4 flex-wrap justify-center">
+                        {dietFilter !== "ALL" && (
+                          <button
+                            type="button"
+                            onClick={() => setDietFilter("ALL")}
+                            className="px-3.5 py-1.5 bg-[#e02424] text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer hover:bg-red-700"
+                          >
+                            Show All Diet ({menuItems.length})
+                          </button>
+                        )}
+                        {selectedCategory !== "ALL" && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCategory("ALL")}
+                            className="px-3.5 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer hover:bg-slate-900"
+                          >
+                            View All Categories
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* 🟢 VEGETARIAN DISHES SECTION */}
+                      {(dietFilter === "ALL" || dietFilter === "VEG" || dietFilter === "IN_ORDER") && vegDishes.length > 0 && (
+                        <div className="space-y-2.5 min-w-0">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-emerald-200/80">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-sm border-2 border-emerald-600 flex items-center justify-center bg-white shadow-2xs">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+                              </span>
+                              <h3 className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wider">
+                                Vegetarian Dishes
+                              </h3>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {vegDishes.length} items
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                            {vegDishes.map((item) => renderCatalogDishCard(item, true))}
                           </div>
                         </div>
+                      )}
 
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5 content-start">
-                          {vegDishes.map((item) => {
-                            const cartEntry = cartItems.find((ci) => ci.menuItem._id === item._id);
-                            const inCartQty = cartEntry?.quantity || 0;
-                            const catName = getDishCategory(item);
+                      {/* 🔴 NON-VEGETARIAN DISHES SECTION */}
+                      {(dietFilter === "ALL" || dietFilter === "NON_VEG" || dietFilter === "IN_ORDER") && nonVegDishes.length > 0 && (
+                        <div className="space-y-2.5 min-w-0">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-rose-200/80">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-sm border-2 border-rose-700 flex items-center justify-center bg-white shadow-2xs">
+                                <span className="w-2.5 h-2.5 rounded-full bg-rose-700" />
+                              </span>
+                              <h3 className="text-xs sm:text-sm font-black text-rose-950 uppercase tracking-wider">
+                                Non-Vegetarian Dishes
+                              </h3>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                                {nonVegDishes.length} items
+                              </span>
+                            </div>
+                          </div>
 
-                            return (
-                              <div
-                                key={item._id}
-                                onClick={() => addItemToCart(item)}
-                                className={`bg-white rounded-2xl p-3.5 border transition-all cursor-pointer group flex flex-col justify-between relative select-none hover:shadow-md active:scale-[0.98] ${
-                                  inCartQty > 0
-                                    ? "border-emerald-400 ring-2 ring-emerald-400/20 shadow-xs"
-                                    : "border-slate-200 hover:border-emerald-300 shadow-2xs"
-                                }`}
-                              >
-                                {inCartQty > 0 && (
-                                  <div className="absolute top-2.5 right-2.5 w-6 h-6 rounded-full bg-emerald-600 text-white text-[11px] font-black flex items-center justify-center shadow-xs">
-                                    {inCartQty}
-                                  </div>
-                                )}
-
-                                <div>
-                                  <div className="flex items-center gap-1.5 mb-1">
-                                    <span className="w-3.5 h-3.5 rounded-xs border-2 border-emerald-600 flex items-center justify-center bg-white shrink-0" title="Pure Veg">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                                    </span>
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
-                                      {catName}
-                                    </span>
-                                    <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-emerald-50 text-emerald-700">
-                                      Veg
-                                    </span>
-                                  </div>
-                                  <h4 className="font-bold text-slate-900 text-sm leading-snug group-hover:text-emerald-700 transition">
-                                    {item.name}
-                                  </h4>
-                                </div>
-
-                                <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
-                                  <span className="font-black text-slate-900 text-sm">
-                                    ₹{Number(item.price).toFixed(2)}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${
-                                      inCartQty > 0
-                                        ? "bg-emerald-600 text-white shadow-xs"
-                                        : "bg-slate-100 group-hover:bg-emerald-600 group-hover:text-white text-slate-700"
-                                    }`}
-                                  >
-                                    <FiPlus size={14} />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 🔴 NON-VEGETARIAN DISHES SECTION */}
-                    {(dietFilter === "ALL" || dietFilter === "NON_VEG") && nonVegDishes.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between pb-2 border-b border-rose-200/80">
-                          <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-sm border-2 border-rose-700 flex items-center justify-center bg-white shadow-2xs">
-                              <span className="w-2.5 h-2.5 rounded-full bg-rose-700" />
-                            </span>
-                            <h3 className="text-xs sm:text-sm font-black text-rose-950 uppercase tracking-wider">
-                              Non-Vegetarian Dishes
-                            </h3>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
-                              {nonVegDishes.length} items
-                            </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3 gap-3">
+                            {nonVegDishes.map((item) => renderCatalogDishCard(item, false))}
                           </div>
                         </div>
-
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5 content-start">
-                          {nonVegDishes.map((item) => {
-                            const cartEntry = cartItems.find((ci) => ci.menuItem._id === item._id);
-                            const inCartQty = cartEntry?.quantity || 0;
-                            const catName = getDishCategory(item);
-
-                            return (
-                              <div
-                                key={item._id}
-                                onClick={() => addItemToCart(item)}
-                                className={`bg-white rounded-2xl p-3.5 border transition-all cursor-pointer group flex flex-col justify-between relative select-none hover:shadow-md active:scale-[0.98] ${
-                                  inCartQty > 0
-                                    ? "border-rose-400 ring-2 ring-rose-400/20 shadow-xs"
-                                    : "border-slate-200 hover:border-rose-300 shadow-2xs"
-                                }`}
-                              >
-                                {inCartQty > 0 && (
-                                  <div className="absolute top-2.5 right-2.5 w-6 h-6 rounded-full bg-rose-700 text-white text-[11px] font-black flex items-center justify-center shadow-xs">
-                                    {inCartQty}
-                                  </div>
-                                )}
-
-                                <div>
-                                  <div className="flex items-center gap-1.5 mb-1">
-                                    <span className="w-3.5 h-3.5 rounded-xs border-2 border-rose-700 flex items-center justify-center bg-white shrink-0" title="Non-Veg">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-rose-700" />
-                                    </span>
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
-                                      {catName}
-                                    </span>
-                                    <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-rose-50 text-rose-700">
-                                      Non-Veg
-                                    </span>
-                                  </div>
-                                  <h4 className="font-bold text-slate-900 text-sm leading-snug group-hover:text-rose-700 transition">
-                                    {item.name}
-                                  </h4>
-                                </div>
-
-                                <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
-                                  <span className="font-black text-slate-900 text-sm">
-                                    ₹{Number(item.price).toFixed(2)}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${
-                                      inCartQty > 0
-                                        ? "bg-rose-700 text-white shadow-xs"
-                                        : "bg-slate-100 group-hover:bg-rose-700 group-hover:text-white text-slate-700"
-                                    }`}
-                                  >
-                                    <FiPlus size={14} />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* RIGHT COLUMN: Customer Details & Order Cart Sidebar */}
-            <div className="w-full lg:w-[440px] xl:w-[480px] bg-white flex flex-col h-full shrink-0 min-h-0 shadow-xl">
-              {/* Customer Details Header Card */}
-              <div className="p-4 border-b border-slate-200/80 bg-slate-50/70 space-y-2.5 shrink-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <FiUser className="text-amber-600" />
-                    Customer Details
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
-                    Optional
-                  </span>
+            {/* 2. RIGHT COLUMN: TAKEAWAY ORDER / CART PANEL (MATCHING IMAGE 2) */}
+            <div className="w-[340px] lg:w-[360px] xl:w-[380px] flex flex-col bg-white border-l border-slate-200 h-full shrink-0 min-h-0 min-w-0 z-20">
+              
+              {/* Order Header */}
+              <div className="px-3.5 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between shrink-0 min-w-0 z-20">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-9 h-9 bg-[#e02424] rounded-xl flex items-center justify-center text-white shadow-md shadow-red-200 shrink-0 font-black text-xs">
+                    TK
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="font-black text-slate-900 text-sm tracking-tight truncate">
+                        Order Details
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-50 text-[#e02424] border border-red-100 shrink-0">
+                        {cartItems.reduce((acc, c) => acc + c.quantity, 0)} Items
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                      TAKEAWAY / PARCEL
+                    </p>
+                  </div>
                 </div>
 
+                <div className="flex items-center gap-1">
+                  {cartItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setCartItems([])}
+                      className="text-[11px] font-bold text-red-600 hover:text-red-700 hover:underline cursor-pointer px-1.5 py-0.5"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsNewOrderModalOpen(false)}
+                    className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg cursor-pointer"
+                    title="Close"
+                  >
+                    <FiX size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Customer Details Form */}
+              <div className="p-3 border-b border-slate-100 bg-slate-50/60 space-y-2 shrink-0">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="relative">
-                    <FiUser className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                    <FiUser className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
                     <input
                       ref={customerNameInputRef}
                       type="text"
-                      placeholder="Customer Name (Optional)"
+                      placeholder="Customer Name"
                       value={customerName}
                       onChange={(e) => {
                         setCustomerName(e.target.value);
                         if (formError) setFormError("");
                       }}
-                      className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 font-medium text-slate-800"
+                      className="w-full pl-7 pr-2 py-1.5 text-xs bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e02424] font-medium text-slate-800"
                     />
                   </div>
                   <div className="relative">
-                    <FiPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                    <FiPhone className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
                     <input
                       type="text"
-                      placeholder="Phone Number (Optional)"
+                      placeholder="Phone Number"
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(e.target.value)}
-                      className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 font-medium text-slate-800"
+                      className="w-full pl-7 pr-2 py-1.5 text-xs bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e02424] font-medium text-slate-800"
                     />
                   </div>
                 </div>
 
                 <div className="relative">
-                  <FiShoppingBag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                  <FiShoppingBag className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
                   <input
                     type="text"
-                    placeholder="Packaging instructions (e.g. pack sambar separate, extra gravy)..."
+                    placeholder="Packaging instructions (e.g. pack sambar separate)..."
                     value={specialNotes}
                     onChange={(e) => setSpecialNotes(e.target.value)}
-                    className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/30 font-medium"
+                    className="w-full pl-7 pr-2 py-1.5 text-xs bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e02424] font-medium text-slate-800"
                   />
                 </div>
               </div>
 
-              {/* Selected Items List */}
-              <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <span>Parcel Items</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200">
-                    {cartItems.reduce((acc, c) => acc + c.quantity, 0)} items
-                  </span>
-                </span>
-                {cartItems.length > 0 && (
-                  <span className="text-[11px] font-bold text-slate-400">
-                    Subtotal: ₹{newOrderSubtotal.toFixed(2)}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2 space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-50">
+              {/* Cart Items List */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 scrollbar-thin">
                 {cartItems.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-slate-400 p-6 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200/60 text-amber-600 flex items-center justify-center mb-3">
-                      <RiTakeawayLine size={28} />
+                    <div className="w-12 h-12 rounded-2xl bg-red-50 text-[#e02424] flex items-center justify-center mb-2.5">
+                      <RiTakeawayLine size={24} />
                     </div>
-                    <p className="font-bold text-slate-800 text-sm">Ticket is Empty</p>
-                    <p className="text-xs text-slate-400 mt-1 max-w-[220px]">
-                      Click dishes from the catalog on the left to pack into this parcel order.
+                    <p className="font-bold text-slate-800 text-sm">No dishes added yet</p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-[200px]">
+                      Select dishes from the menu catalog on the left to pack.
                     </p>
                   </div>
                 ) : (
@@ -1367,25 +1691,24 @@ export default function TakeawayPage() {
                     return (
                       <div
                         key={ci.menuItem._id}
-                        className="py-2 px-2.5 rounded-xl border border-slate-200/80 bg-white hover:border-amber-200 hover:shadow-xs transition-all flex items-center justify-between gap-2"
+                        className="py-2 px-2.5 rounded-xl border border-slate-200 bg-white hover:border-gray-300 transition-all flex items-center justify-between gap-2"
                       >
-                        {/* Name and unit price */}
                         <div className="flex-1 min-w-0 pr-1">
-                          <h4 className="font-bold text-slate-900 text-xs sm:text-[13px] leading-snug truncate" title={ci.menuItem.name}>
+                          <h4 className="font-bold text-slate-900 text-xs truncate" title={ci.menuItem.name}>
                             {ci.menuItem.name}
                           </h4>
                           <span className="text-[11px] font-bold text-slate-400">
-                            ₹{Number(ci.menuItem.price).toFixed(2)} each
+                            ₹{Number(ci.menuItem.price).toFixed(2)}
                           </span>
                         </div>
 
                         {/* Stepper, line total, remove */}
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200/80">
+                          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
                             <button
                               type="button"
                               onClick={() => updateCartQuantity(ci.menuItem._id, -1)}
-                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
+                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition active:scale-90 cursor-pointer"
                               title="Decrease"
                             >
                               <FiMinus size={11} />
@@ -1394,7 +1717,7 @@ export default function TakeawayPage() {
                             <button
                               type="button"
                               onClick={() => updateCartQuantity(ci.menuItem._id, 1)}
-                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition-all active:scale-90 cursor-pointer"
+                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white text-slate-600 transition active:scale-90 cursor-pointer"
                               title="Increase"
                             >
                               <FiPlus size={11} />
@@ -1402,16 +1725,16 @@ export default function TakeawayPage() {
                           </div>
 
                           <div className="w-14 text-right">
-                            <span className="font-bold text-slate-900 text-xs sm:text-[13px]">₹{lineTotal}</span>
+                            <span className="font-bold text-slate-900 text-xs">₹{lineTotal}</span>
                           </div>
 
                           <button
                             type="button"
                             onClick={() => updateCartQuantity(ci.menuItem._id, -ci.quantity)}
-                            className="text-slate-300 hover:text-red-500 transition-colors p-1 active:scale-90 cursor-pointer"
-                            title="Remove from ticket"
+                            className="text-slate-300 hover:text-red-500 transition-colors p-1 cursor-pointer"
+                            title="Remove"
                           >
-                            <FiTrash2 size={14} />
+                            <FiTrash2 size={13} />
                           </button>
                         </div>
                       </div>
@@ -1420,10 +1743,16 @@ export default function TakeawayPage() {
                 )}
               </div>
 
-              {/* Billing Summary & Actions Footer */}
-              <div className="border-t border-slate-200 bg-white px-4 py-3 shrink-0 shadow-lg space-y-2 z-10">
+              {/* Billing Summary & Actions Footer (Matching 2nd image) */}
+              <div className="border-t border-slate-200 bg-white px-4 py-3 shrink-0 space-y-2 z-10 shadow-lg">
+                {formError && (
+                  <p className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded-lg border border-red-200">
+                    {formError}
+                  </p>
+                )}
+
                 {/* Subtotal & GST */}
-                <div className="space-y-1.5 text-xs">
+                <div className="space-y-1 text-xs">
                   <div className="flex items-center justify-between text-slate-600">
                     <span className="font-bold text-[11px] uppercase tracking-wider text-slate-400">Subtotal</span>
                     <span className="font-black text-slate-900 text-sm">
@@ -1441,130 +1770,72 @@ export default function TakeawayPage() {
                           onChange={(e) => setIsGstEnabled(e.target.checked)}
                           className="sr-only peer"
                         />
-                        <div className="w-8 h-4 bg-slate-200 rounded-full peer peer-checked:bg-amber-600 transition-all after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-4 shadow-inner" />
+                        <div className="w-8 h-4 bg-slate-200 rounded-full peer peer-checked:bg-[#e02424] transition-all after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-4 shadow-inner" />
                       </label>
                     </div>
                     <span className="font-bold text-slate-700 text-xs">
                       {isGstEnabled ? `₹${newOrderGst.toFixed(2)}` : "₹0.00"}
                     </span>
                   </div>
+
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span className="font-bold text-[11px] uppercase tracking-wider text-slate-400">Service Charge</span>
+                    <span className="font-semibold text-slate-700 text-xs">₹0.00</span>
+                  </div>
                 </div>
 
                 {/* Total Payable */}
                 <div className="pt-2 border-t border-dashed border-slate-200 flex items-center justify-between">
                   <span className="text-xs font-black text-slate-500 uppercase tracking-wider">
-                    Total Amount
+                    Total Payable
                   </span>
-                  <span className="text-2xl font-black text-red-600 tracking-tight">
+                  <span className="text-2xl font-black text-[#e02424] tracking-tight">
                     ₹{newOrderTotal.toFixed(2)}
                   </span>
                 </div>
 
-                {/* Payment Option Selector */}
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Payment Method</p>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {(["UNPAID", "CASH", "UPI", "CARD"] as const).map((method) => (
-                      <button
-                        key={method}
-                        type="button"
-                        onClick={() => setPaymentChoice(method)}
-                        className={`py-1.5 rounded-xl text-[10px] font-black tracking-wider uppercase transition cursor-pointer ${
-                          paymentChoice === method
-                            ? "bg-slate-900 text-white shadow-xs"
-                            : "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/60"
-                        }`}
-                      >
-                        {method === "UNPAID" ? "Pay Later" : method}
-                      </button>
-                    ))}
+                {/* Main Action Buttons Matching Image 2 */}
+                <div className="pt-1 space-y-2">
+                  {/* Primary: ORDER & SEND TO KITCHEN (KOT) */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleCreateOrder(e, "UNPAID")}
+                    disabled={isSubmittingOrder || cartItems.length === 0}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#e02424] hover:bg-[#c81e1e] text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-red-900/20 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>{isSubmittingOrder ? "Submitting..." : "Order & Send to Kitchen (KOT) ➔"}</span>
+                  </button>
+
+                  {/* Secondary Row: BILL (White button) & PAY (Green button) */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => handleCreateOrder(e, "UNPAID")}
+                      disabled={isSubmittingOrder || cartItems.length === 0}
+                      className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 font-bold text-xs uppercase tracking-wider transition active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                    >
+                      <FiPrinter size={13} />
+                      <span>Bill</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => handleCreateOrder(e, "CASH")}
+                      disabled={isSubmittingOrder || cartItems.length === 0}
+                      className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-xs transition active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                    >
+                      <FiCheckCircle size={13} />
+                      <span>Pay</span>
+                    </button>
                   </div>
                 </div>
 
-                {formError && (
-                  <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-xl border border-red-200">
-                    {formError}
-                  </p>
-                )}
-
-                {/* Dispatch Button */}
-                <button
-                  type="button"
-                  onClick={handleCreateOrder}
-                  disabled={isSubmittingOrder || cartItems.length === 0}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-black text-xs uppercase tracking-wider shadow-md shadow-red-900/20 active:scale-95 transition disabled:opacity-40 cursor-pointer"
-                >
-                  {isSubmittingOrder ? (
-                    <span>Placing Takeaway Ticket...</span>
-                  ) : (
-                    <>
-                      <RiFireLine size={16} className="animate-pulse" />
-                      <span>Order & Send KOT to Kitchen ➔</span>
-                    </>
-                  )}
-                </button>
               </div>
             </div>
+
           </div>
+
+          {renderSettleModal()}
         </div>
-      )}
-
-      {/* =================================================================== */}
-      {/* MODAL: SETTLE / RECORD PAYMENT                                      */}
-      {/* =================================================================== */}
-      {settleOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="font-black text-lg text-slate-900">Settle Takeaway Bill</h3>
-                <p className="text-xs text-slate-400">Order {settleOrder.orderNumber || "#TK"}</p>
-              </div>
-              <button
-                onClick={() => setSettleOrder(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition"
-              >
-                <FiX size={18} />
-              </button>
-            </div>
-
-            <div className="text-center py-2">
-              <span className="text-xs text-slate-400 uppercase font-bold tracking-wider">Amount to Collect</span>
-              <p className="text-3xl font-black text-slate-900 tracking-tight mt-1">
-                ₹{settleOrder.totalAmount?.toFixed(2)}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Select Payment Method</p>
-              <div className="grid grid-cols-3 gap-2">
-                {(["CASH", "UPI", "CARD"] as const).map((method) => (
-                  <button
-                    key={method}
-                    type="button"
-                    onClick={() => setSettlePaymentMethod(method)}
-                    className={`py-3 rounded-xl text-xs font-bold tracking-wider transition cursor-pointer border ${
-                      settlePaymentMethod === method
-                        ? "bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-900/20"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    {method}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={handleCompletePayment}
-              disabled={isSubmittingPayment}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-950/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
-            >
-              {isSubmittingPayment ? "Recording Payment..." : `Collect ₹${settleOrder.totalAmount?.toFixed(2)} & Handover`}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    );
 }

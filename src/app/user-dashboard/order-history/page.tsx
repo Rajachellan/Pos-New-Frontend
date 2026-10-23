@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import api from "../../services/api";
 import { motion, AnimatePresence } from "framer-motion";
@@ -17,8 +17,11 @@ import {
   FiRefreshCw,
   FiCalendar,
   FiShoppingBag,
+  FiFilter,
+  FiArrowRight,
+  FiTrendingUp,
 } from "react-icons/fi";
-import { MdTableRestaurant } from "react-icons/md";
+import { MdTableRestaurant, MdDateRange } from "react-icons/md";
 import { useAuth } from "@/src/app/context/AuthContext";
 import { getActiveBranchReceiptInfo, generateThermalReceiptHtml } from "../../utils/receiptBranding";
 
@@ -55,23 +58,153 @@ interface Summary {
   activeCount: number;
   cancelledCount: number;
   canViewFinances?: boolean;
+  todayRevenue?: number;
+  yesterdayRevenue?: number;
+  thisMonthRevenue?: number;
 }
+
+type DatePreset =
+  | "ALL"
+  | "TODAY"
+  | "YESTERDAY"
+  | "THIS_MONTH"
+  | "SPECIFIC_DATE"
+  | "SPECIFIC_MONTH"
+  | "CUSTOM_RANGE";
+
+const getLocalDateString = (d: Date = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getLocalMonthString = (d: Date = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+};
+
+const calculateDateRange = (
+  preset: DatePreset,
+  customFrom: string,
+  customTo: string,
+  specificDate: string,
+  specificMonth: string
+): { startDate?: string; endDate?: string; label: string } => {
+  const now = new Date();
+
+  switch (preset) {
+    case "TODAY": {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      const dateLabel = now.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        label: `Today (${dateLabel})`,
+      };
+    }
+    case "YESTERDAY": {
+      const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const start = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 0, 0, 0, 0);
+      const end = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 23, 59, 59, 999);
+      const dateLabel = y.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        label: `Yesterday (${dateLabel})`,
+      };
+    }
+    case "THIS_MONTH": {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      const monthLabel = now.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+      return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        label: `This Month (${monthLabel})`,
+      };
+    }
+    case "SPECIFIC_DATE": {
+      if (!specificDate) return { label: "Pick a Date" };
+      const [year, month, day] = specificDate.split("-").map(Number);
+      const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      const end = new Date(year, month - 1, day, 23, 59, 59, 999);
+      const dateLabel = start.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        label: `Date: ${dateLabel}`,
+      };
+    }
+    case "SPECIFIC_MONTH": {
+      if (!specificMonth) return { label: "Pick a Month" };
+      const [year, month] = specificMonth.split("-").map(Number);
+      const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+      const end = new Date(year, month, 0, 23, 59, 59, 999);
+      const monthLabel = start.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+      return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        label: `Month: ${monthLabel}`,
+      };
+    }
+    case "CUSTOM_RANGE": {
+      if (!customFrom || !customTo) return { label: "Custom Date Range" };
+      const [sY, sM, sD] = customFrom.split("-").map(Number);
+      const start = new Date(sY, sM - 1, sD, 0, 0, 0, 0);
+      const [eY, eM, eD] = customTo.split("-").map(Number);
+      const end = new Date(eY, eM - 1, eD, 23, 59, 59, 999);
+      const fromLabel = start.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+      const toLabel = end.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      return {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        label: `${fromLabel} - ${toLabel}`,
+      };
+    }
+    case "ALL":
+    default:
+      return {
+        label: "All Time",
+      };
+  }
+};
 
 function OrderHistoryContent() {
   const { canViewFinances } = useAuth();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [summary, setSummary] = useState<Summary>({
     totalOrders: 0,
     totalRevenue: 0,
     activeCount: 0,
     cancelledCount: 0,
+    todayRevenue: 0,
+    yesterdayRevenue: 0,
+    thisMonthRevenue: 0,
   });
   const [loading, setLoading] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<string>(tabParam ? tabParam.toUpperCase() : "ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Date Filtering States
+  const [datePreset, setDatePreset] = useState<DatePreset>("ALL");
+  const [specificDate, setSpecificDate] = useState<string>(getLocalDateString());
+  const [specificMonth, setSpecificMonth] = useState<string>(getLocalMonthString());
+  const [customFrom, setCustomFrom] = useState<string>(getLocalDateString());
+  const [customTo, setCustomTo] = useState<string>(getLocalDateString());
+
+  // Active filter range sent to server
+  const [activeDateRange, setActiveDateRange] = useState<{
+    startDate?: string;
+    endDate?: string;
+    label: string;
+  }>({ label: "All Time" });
 
   useEffect(() => {
     if (tabParam) {
@@ -79,12 +212,23 @@ function OrderHistoryContent() {
     }
   }, [tabParam]);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (range?: { startDate?: string; endDate?: string }) => {
     try {
       setLoading(true);
       const savedBranchId = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch") : null;
-      const branchQuery = savedBranchId && savedBranchId !== "ALL" ? `?branchId=${savedBranchId}` : "";
-      const res = await api.get(`/orders/history${branchQuery}`);
+      const params = new URLSearchParams();
+
+      if (savedBranchId && savedBranchId !== "ALL") {
+        params.append("branchId", savedBranchId);
+      }
+
+      const targetRange = range !== undefined ? range : activeDateRange;
+      if (targetRange?.startDate) params.append("startDate", targetRange.startDate);
+      if (targetRange?.endDate) params.append("endDate", targetRange.endDate);
+
+      const queryString = params.toString() ? `?${params.toString()}` : "";
+      const res = await api.get(`/orders/history${queryString}`);
+
       if (res.data.success) {
         setOrders(res.data.data);
         if (res.data.summary) {
@@ -98,6 +242,38 @@ function OrderHistoryContent() {
     }
   };
 
+  const applyPreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    const range = calculateDateRange(preset, customFrom, customTo, specificDate, specificMonth);
+    setActiveDateRange(range);
+    fetchOrders(range);
+  };
+
+  const handleApplyCustomRange = () => {
+    if (!customFrom || !customTo) return;
+    const range = calculateDateRange("CUSTOM_RANGE", customFrom, customTo, specificDate, specificMonth);
+    setActiveDateRange(range);
+    fetchOrders(range);
+  };
+
+  const handleApplySpecificDate = (dateVal: string) => {
+    setSpecificDate(dateVal);
+    const range = calculateDateRange("SPECIFIC_DATE", customFrom, customTo, dateVal, specificMonth);
+    setActiveDateRange(range);
+    fetchOrders(range);
+  };
+
+  const handleApplySpecificMonth = (monthVal: string) => {
+    setSpecificMonth(monthVal);
+    const range = calculateDateRange("SPECIFIC_MONTH", customFrom, customTo, specificDate, monthVal);
+    setActiveDateRange(range);
+    fetchOrders(range);
+  };
+
+  const handleClearDateFilter = () => {
+    applyPreset("ALL");
+  };
+
   const handleSettleOrder = async (order: Order) => {
     try {
       await api.post("/pay/order", {
@@ -105,6 +281,7 @@ function OrderHistoryContent() {
         tableId: order.tableId?._id,
         paymentMethod: "CASH",
       });
+      await handlePrintReceipt({ ...order, paymentMethod: "CASH", status: "COMPLETED" });
       await fetchOrders();
     } catch (err) {
       console.error("Failed to settle order:", err);
@@ -124,24 +301,26 @@ function OrderHistoryContent() {
   }, []);
 
   // Filter orders based on status & search query
-  const filteredOrders = orders.filter((order) => {
-    const matchesStatus =
-      selectedStatus === "ALL"
-        ? true
-        : selectedStatus === "ACTIVE"
-        ? ["PENDING", "ORDERED", "PREPARING", "READY"].includes(order.status)
-        : order.status === selectedStatus;
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const matchesStatus =
+        selectedStatus === "ALL"
+          ? true
+          : selectedStatus === "ACTIVE"
+          ? ["PENDING", "ORDERED", "PREPARING", "READY"].includes(order.status)
+          : order.status === selectedStatus;
 
-    const tableNum = order.tableId?.tableNumber ? String(order.tableId.tableNumber) : "";
-    const orderNum = order.orderNumber || "";
-    const matchesSearch =
-      order._id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      orderNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tableNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.items.some((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
+      const tableNum = order.tableId?.tableNumber ? String(order.tableId.tableNumber) : "";
+      const orderNum = order.orderNumber || "";
+      const matchesSearch =
+        order._id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        orderNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tableNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.items.some((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    return matchesStatus && matchesSearch;
-  });
+      return matchesStatus && matchesSearch;
+    });
+  }, [orders, selectedStatus, searchQuery]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -185,7 +364,7 @@ function OrderHistoryContent() {
 
     try {
       const receiptInfo = await getActiveBranchReceiptInfo();
-      const rawToken = order.orderNumber?.replace(/\D/g, '') || "65";
+      const rawToken = order.orderNumber?.replace(/\D/g, "") || "65";
       const tokenNumber = rawToken.length > 3 ? rawToken.slice(-3) : rawToken || "65";
 
       const html = generateThermalReceiptHtml({
@@ -237,19 +416,208 @@ function OrderHistoryContent() {
         </div>
 
         <button
-          onClick={fetchOrders}
+          onClick={() => fetchOrders()}
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-100 transition shadow-xs w-fit"
         >
           <FiRefreshCw className={loading ? "animate-spin" : ""} /> Refresh Feed
         </button>
       </div>
 
-      {/* Analytics Metric Cards */}
+      {/* Quick Period Revenue Highlights (Today, Yesterday, This Month) */}
+      {canViewFinances() && (
+        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-xs mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-gray-700">
+            <FiTrendingUp className="text-[#e02424] text-base" />
+            <span>Quick Revenue Glance:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Today Pill */}
+            <button
+              onClick={() => applyPreset("TODAY")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
+                datePreset === "TODAY"
+                  ? "bg-emerald-500 text-white border-emerald-600 shadow-xs"
+                  : "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+              }`}
+              title="Click to view Today's orders"
+            >
+              <span>Today:</span>
+              <span className="font-extrabold">₹{(summary.todayRevenue || 0).toFixed(2)}</span>
+            </button>
+
+            {/* Yesterday Pill */}
+            <button
+              onClick={() => applyPreset("YESTERDAY")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
+                datePreset === "YESTERDAY"
+                  ? "bg-blue-600 text-white border-blue-700 shadow-xs"
+                  : "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
+              }`}
+              title="Click to view Yesterday's orders"
+            >
+              <span>Yesterday:</span>
+              <span className="font-extrabold">₹{(summary.yesterdayRevenue || 0).toFixed(2)}</span>
+            </button>
+
+            {/* This Month Pill */}
+            <button
+              onClick={() => applyPreset("THIS_MONTH")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
+                datePreset === "THIS_MONTH"
+                  ? "bg-purple-600 text-white border-purple-700 shadow-xs"
+                  : "bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100"
+              }`}
+              title="Click to view This Month's orders"
+            >
+              <span>This Month:</span>
+              <span className="font-extrabold">₹{(summary.thisMonthRevenue || 0).toFixed(2)}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Date Filter & Range Selector Bar */}
+      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs mb-6 space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Preset Buttons */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider mr-1 flex items-center gap-1">
+              <FiCalendar className="text-[#e02424]" /> Date:
+            </span>
+
+            {[
+              { key: "ALL", label: "All Time" },
+              { key: "TODAY", label: "Today" },
+              { key: "YESTERDAY", label: "Yesterday" },
+              { key: "THIS_MONTH", label: "This Month" },
+              { key: "SPECIFIC_DATE", label: "Particular Date" },
+              { key: "SPECIFIC_MONTH", label: "Particular Month" },
+              { key: "CUSTOM_RANGE", label: "Date Range (From - To)" },
+            ].map((p) => (
+              <button
+                key={p.key}
+                onClick={() => {
+                  if (p.key === "SPECIFIC_DATE" || p.key === "SPECIFIC_MONTH" || p.key === "CUSTOM_RANGE") {
+                    setDatePreset(p.key as DatePreset);
+                  } else {
+                    applyPreset(p.key as DatePreset);
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+                  datePreset === p.key
+                    ? "bg-[#e02424] text-white shadow-xs"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Active Range Indicator & Clear Button */}
+          {activeDateRange.startDate && (
+            <div className="flex items-center gap-2 self-start lg:self-center">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                <FiFilter className="text-amber-600" />
+                Active: {activeDateRange.label}
+              </span>
+              <button
+                onClick={handleClearDateFilter}
+                className="text-xs text-gray-500 hover:text-[#e02424] font-semibold underline transition cursor-pointer"
+              >
+                Reset to All Time
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Dynamic Inputs when Particular Date is selected */}
+        {datePreset === "SPECIFIC_DATE" && (
+          <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold text-gray-700">Select Date:</span>
+            <input
+              type="date"
+              value={specificDate}
+              onChange={(e) => handleApplySpecificDate(e.target.value)}
+              className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#e02424]"
+            />
+            <button
+              onClick={() => handleApplySpecificDate(specificDate)}
+              className="px-3 py-1.5 bg-[#e02424] text-white rounded-lg text-xs font-bold hover:bg-[#c81e1e] transition shadow-2xs"
+            >
+              Apply Date
+            </button>
+          </div>
+        )}
+
+        {/* Dynamic Inputs when Particular Month is selected */}
+        {datePreset === "SPECIFIC_MONTH" && (
+          <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold text-gray-700">Select Month:</span>
+            <input
+              type="month"
+              value={specificMonth}
+              onChange={(e) => handleApplySpecificMonth(e.target.value)}
+              className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#e02424]"
+            />
+            <button
+              onClick={() => handleApplySpecificMonth(specificMonth)}
+              className="px-3 py-1.5 bg-[#e02424] text-white rounded-lg text-xs font-bold hover:bg-[#c81e1e] transition shadow-2xs"
+            >
+              Apply Month
+            </button>
+          </div>
+        )}
+
+        {/* Dynamic Inputs when Date Range (From - To) is selected */}
+        {datePreset === "CUSTOM_RANGE" && (
+          <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold text-gray-700">From Date:</span>
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#e02424]"
+            />
+            <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+              <FiArrowRight className="text-gray-400" /> To Date:
+            </span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#e02424]"
+            />
+            <button
+              onClick={handleApplyCustomRange}
+              className="px-4 py-1.5 bg-[#e02424] text-white rounded-lg text-xs font-bold hover:bg-[#c81e1e] transition shadow-2xs"
+            >
+              Filter Range
+            </button>
+            <button
+              onClick={handleClearDateFilter}
+              className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs font-semibold hover:bg-gray-200 transition"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Analytics Metric Cards for Selected Date Filter */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {canViewFinances() && summary.totalRevenue !== null ? (
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Sales Revenue</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Sales Revenue
+                {activeDateRange.label && (
+                  <span className="ml-1 text-[10px] text-[#e02424] font-bold lowercase">
+                    ({activeDateRange.label})
+                  </span>
+                )}
+              </p>
               <h3 className="text-2xl font-extrabold text-gray-900 mt-1">₹{(summary.totalRevenue || 0).toFixed(2)}</h3>
             </div>
             <div className="w-11 h-11 rounded-xl bg-[#fdf2f2] text-[#e02424] flex items-center justify-center text-xl font-bold">
@@ -259,7 +627,14 @@ function OrderHistoryContent() {
         ) : (
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Completed Orders</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Completed Orders
+                {activeDateRange.label && (
+                  <span className="ml-1 text-[10px] text-emerald-600 font-bold lowercase">
+                    ({activeDateRange.label})
+                  </span>
+                )}
+              </p>
               <h3 className="text-2xl font-extrabold text-emerald-600 mt-1">
                 {orders.filter((o) => o.status === "COMPLETED").length}
               </h3>
@@ -272,7 +647,14 @@ function OrderHistoryContent() {
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Orders</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Total Orders
+              {activeDateRange.label && (
+                <span className="ml-1 text-[10px] text-blue-600 font-bold lowercase">
+                  ({activeDateRange.label})
+                </span>
+              )}
+            </p>
             <h3 className="text-2xl font-extrabold text-gray-900 mt-1">{summary.totalOrders}</h3>
           </div>
           <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold">
@@ -348,8 +730,20 @@ function OrderHistoryContent() {
         ) : filteredOrders.length === 0 ? (
           <div className="p-12 text-center text-gray-400">
             <FiShoppingBag className="text-3xl mx-auto mb-2 text-gray-300" />
-            <p className="text-sm font-semibold text-gray-600">No orders found matching your filter.</p>
-            <p className="text-xs text-gray-400 mt-1">Try clearing your search query or switching tabs.</p>
+            <p className="text-sm font-semibold text-gray-600">No orders found for the selected criteria.</p>
+            <p className="text-xs text-gray-400 mt-1">
+              {activeDateRange.startDate
+                ? `No orders matching "${activeDateRange.label}". Try picking another date or resetting.`
+                : "Try clearing your search query or switching tabs."}
+            </p>
+            {activeDateRange.startDate && (
+              <button
+                onClick={handleClearDateFilter}
+                className="mt-3 px-3 py-1.5 bg-[#e02424] text-white rounded-lg text-xs font-semibold hover:bg-[#c81e1e] transition shadow-xs"
+              >
+                Reset to All Time
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -378,7 +772,7 @@ function OrderHistoryContent() {
                         {new Date(order.createdAt).toLocaleDateString()}
                       </div>
                       <div className="text-[10px] text-gray-400 mt-0.5">
-                        {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -547,4 +941,3 @@ export default function OrderHistoryPage() {
     </Suspense>
   );
 }
-
